@@ -152,7 +152,7 @@ class DiscordBot(commands.Bot):
             (int(file.split("_")[0]), file)
             for file in os.listdir(migrations_dir)
             if file.endswith(".sql")
-        )
+        ) if os.path.isdir(migrations_dir) else []
         latest_version = migrations[-1][0] if migrations else 0
 
         async with aiosqlite.connect(f"{database_dir}/database.db") as db:
