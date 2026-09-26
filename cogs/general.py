@@ -200,7 +200,9 @@ class General(commands.Cog, name="general"):
             await context.send(embed=embed)
             return
         target_number = int(char['attr'][attribute]['value'])
-        if skill:
+        # The sheet marks known skills with a checkbox, which comes through as "TRUE"
+        has_skill = skill is not None and str(char['skills'].get(skill)).upper() == "TRUE"
+        if has_skill:
             if skill in K_TRAINED_SKILLS:
                 target_number += 10
             elif skill in K_EXPERT_SKILLS:
@@ -237,8 +239,10 @@ class General(commands.Cog, name="general"):
             roll_line = f"Roll: {roll.result}"
         attribute_value = int(char['attr'][attribute]['value'])
         attribute_line = f"{attribute}: {attribute_value}"
-        if skill:
+        if has_skill:
             attribute_line += f" + {target_number - attribute_value} ({skill}) = {target_number}"
+        elif skill:
+            attribute_line += f" (no {skill} skill)"
 
         embed = discord.Embed(
             description=(
