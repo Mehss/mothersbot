@@ -11,9 +11,17 @@ import random
 
 import aiohttp
 import discord
+import gspread
+import json
+import re
+import pandas as pd
+import asyncio
+import d20
 from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
+
+from constants import *
 
 
 class FeedbackForm(discord.ui.Modal, title="Feeedback"):
@@ -34,54 +42,6 @@ class FeedbackForm(discord.ui.Modal, title="Feeedback"):
 class General(commands.Cog, name="general"):
     def __init__(self, bot) -> None:
         self.bot = bot
-        self.context_menu_user = app_commands.ContextMenu(
-            name="Grab ID", callback=self.grab_id
-        )
-        self.bot.tree.add_command(self.context_menu_user)
-        self.context_menu_message = app_commands.ContextMenu(
-            name="Remove spoilers", callback=self.remove_spoilers
-        )
-        self.bot.tree.add_command(self.context_menu_message)
-
-    # Message context menu command
-    async def remove_spoilers(
-        self, interaction: discord.Interaction, message: discord.Message
-    ) -> None:
-        """
-        Removes the spoilers from the message. This command requires the MESSAGE_CONTENT intent to work properly.
-
-        :param interaction: The application command interaction.
-        :param message: The message that is being interacted with.
-        """
-        spoiler_attachment = None
-        for attachment in message.attachments:
-            if attachment.is_spoiler():
-                spoiler_attachment = attachment
-                break
-        embed = discord.Embed(
-            title="Message without spoilers",
-            description=message.content.replace("||", ""),
-            color=0xBEBEFE,
-        )
-        if spoiler_attachment is not None:
-            embed.set_image(url=attachment.url)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    # User context menu command
-    async def grab_id(
-        self, interaction: discord.Interaction, user: discord.User
-    ) -> None:
-        """
-        Grabs the ID of the user.
-
-        :param interaction: The application command interaction.
-        :param user: The user that is being interacted with.
-        """
-        embed = discord.Embed(
-            description=f"The ID of {user.mention} is `{user.id}`.",
-            color=0xBEBEFE,
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @commands.hybrid_command(
         name="help", description="List all commands the bot has loaded."
@@ -181,146 +141,328 @@ class General(commands.Cog, name="general"):
         await context.send(embed=embed)
 
     @commands.hybrid_command(
-        name="invite",
-        description="Get the invite link of the bot to be able to invite it.",
+        name="check",
+        description="Make a check.",
     )
-    async def invite(self, context: Context) -> None:
-        """
-        Get the invite link of the bot to be able to invite it.
-
-        :param context: The hybrid command context.
-        """
-        embed = discord.Embed(
-            description=f"Invite me by clicking [here]({self.bot.invite_link}).",
-            color=0xD75BF4,
-        )
-        try:
-            await context.author.send(embed=embed)
-            await context.send("I sent you a private message!")
-        except discord.Forbidden:
+    @app_commands.describe(
+        attribute="The attribute to check.",
+        skill="The skill to check.",
+        adv="Roll with advantage [+] or disadvantage [-].",
+    )
+    @app_commands.choices(
+        attribute=[app_commands.Choice(name=a, value=a) for a in K_ATTRIBUTES],
+        adv=[
+            app_commands.Choice(name="Advantage [+]", value="adv"),
+            app_commands.Choice(name="Disadvantage [-]", value="dis"),
+        ],
+    )
+    async def check(
+        self,
+        context: Context,
+        attribute: str,
+        skill: str | None = None,
+        adv: str | None = None,
+    ) -> None:
+        # Prefix commands and typed-over autocomplete bypass the slash options, so validate here
+        if attribute not in K_ATTRIBUTES:
+            embed = discord.Embed(
+                description=f"Unknown attribute `{attribute}`. Choose one of: {', '.join(K_ATTRIBUTES)}.",
+                color=0xE02B2B,
+            )
             await context.send(embed=embed)
+            return
+        if skill is not None and skill not in K_SKILLS:
+            embed = discord.Embed(
+                description=f"Unknown skill `{skill}`.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+            return
+        if adv is not None and adv not in ("adv", "dis"):
+            embed = discord.Embed(
+                description=f"Unknown option `{adv}`. Use `adv` or `dis`.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+            return
+        if context.guild is None:
+            embed = discord.Embed(
+                description="This command can only be used in a server.", color=0xE02B2B
+            )
+            await context.send(embed=embed)
+            return
+        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        if char is None:
+            embed = discord.Embed(
+                description="You don't have a character yet, use `add` with your sheet link first.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+            return
+        target_number = int(char['attr'][attribute]['value'])
+        if skill:
+            if skill in K_TRAINED_SKILLS:
+                target_number += 10
+            elif skill in K_EXPERT_SKILLS:
+                target_number += 15
+            elif skill in K_MASTER_SKILLS:
+                target_number += 20
+
+        # Advantage/disadvantage rolls twice and keeps the better/worse outcome
+        rolls = [d20.roll('1d100-1') for _ in range(2 if adv else 1)]
+
+        def outcome(roll: d20.RollResult) -> tuple[int, int]:
+            # Rank: critical failure < failure < success < critical success,
+            # ties broken towards the lower roll
+            success = roll.total < target_number
+            crit = roll.total % 11 == 0
+            rank = (2 if success else 1) + (1 if crit and success else -1 if crit else 0)
+            return rank, -roll.total
+
+        if adv == "dis":
+            roll = min(rolls, key=outcome)
+        else:
+            roll = max(rolls, key=outcome)
+        crit = roll.total % 11 == 0
+        success = roll.total < target_number
+
+        result = "Success" if success else "Failure"
+        if crit:
+            result = f"Critical {result}"
+        if adv:
+            roll_line = f"Rolls ({'[+]' if adv == 'adv' else '[-]'}): " + ", ".join(
+                f"**{r.result}**" if r is roll else r.result for r in rolls
+            )
+        else:
+            roll_line = f"Roll: {roll.result}"
+        attribute_value = int(char['attr'][attribute]['value'])
+        attribute_line = f"{attribute}: {attribute_value}"
+        if skill:
+            attribute_line += f" + {target_number - attribute_value} ({skill}) = {target_number}"
+
+        embed = discord.Embed(
+            description=(
+                f"## {char['info']['name']} makes a {attribute} check!\n"
+                f"# {result}\n"
+                f"{roll_line}\n"
+                f"{attribute_line}"
+            ),
+            color=0x57F287 if success else 0xE02B2B,
+        )
+        embeds = [embed]
+        # A Critical Failure forces a Panic Check
+        if crit and not success:
+            embeds.append(self.panic_embed(char))
+        await context.send(embeds=embeds)
+
+    @check.autocomplete("skill")
+    async def skill_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        # Discord allows at most 25 choices, and there are more skills than that, so autocomplete instead
+        return [
+            app_commands.Choice(name=skill, value=skill)
+            for skill in K_SKILLS
+            if current.lower() in skill.lower()
+        ][:25]
+
+    @staticmethod
+    def roll_panic(stress: int) -> tuple[d20.RollResult, list[tuple[d20.RollResult, str, str]]]:
+        """
+        Makes a Panic Check: roll 1d20, and if it is not greater than the current Stress,
+        the character panics and that roll is looked up on the panic table.
+        Compounding Problems rolls twice more on the table, so there can be more than one effect.
+
+        :param stress: The character's current Stress.
+        :return: The check roll, and a list of (roll, name, effect) for every effect (empty if no panic).
+        """
+        check_roll = d20.roll('1d20')
+        if check_roll.total > stress:
+            return check_roll, []
+
+        results = []
+        roll = check_roll
+        pending = 0
+        while True:
+            name, effect = K_PANIC_EFFECT[roll.total]
+            results.append((roll, name, effect))
+            if name == 'Compounding Problems':
+                pending += 2
+            if not pending:
+                break
+            pending -= 1
+            roll = d20.roll('1d20')
+        return check_roll, results
 
     @commands.hybrid_command(
-        name="server",
-        description="Get the invite link of the discord server of the bot for some support.",
+        name="panic",
+        description="Make a Panic Check against your Stress.",
     )
-    async def server(self, context: Context) -> None:
+    async def panic(self, context: Context) -> None:
         """
-        Get the invite link of the discord server of the bot for some support.
+        Makes a Panic Check against the character's Stress and shows any panic effects.
 
         :param context: The hybrid command context.
         """
-        embed = discord.Embed(
-            description=f"Join the support server for the bot by clicking [here](https://discord.gg/mTBrXyWxAF).",
-            color=0xD75BF4,
-        )
-        try:
-            await context.author.send(embed=embed)
-            await context.send("I sent you a private message!")
-        except discord.Forbidden:
+        if context.guild is None:
+            embed = discord.Embed(
+                description="This command can only be used in a server.", color=0xE02B2B
+            )
             await context.send(embed=embed)
+            return
+        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        if char is None:
+            embed = discord.Embed(
+                description="You don't have a character yet, use `add` with your sheet link first.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+            return
 
-    @commands.hybrid_command(
-        name="8ball",
-        description="Ask any question to the bot.",
-    )
-    @app_commands.describe(question="The question you want to ask.")
-    async def eight_ball(self, context: Context, *, question: str) -> None:
+        await context.send(embed=self.panic_embed(char))
+
+    def panic_embed(self, char: dict) -> discord.Embed:
         """
-        Ask any question to the bot.
+        Makes a Panic Check for the character and builds the embed showing the result.
+
+        :param char: The character, as returned by get_character.
+        :return: The embed with the check roll and any panic effects.
+        """
+        stress = int(char['attr']['Stress']['value'])
+        check_roll, effects = self.roll_panic(stress)
+        header = (
+            f"{char['info']['name']} makes a Panic Check!\n"
+            f"Roll: {check_roll.result} vs Stress {stress}\n"
+        )
+        if not effects:
+            return discord.Embed(
+                description=f"{header}# Keeps it together",
+                color=0x57F287,
+            )
+
+        embed = discord.Embed(description=f"{header}# Panic!", color=0xE02B2B)
+        for roll, name, effect in effects:
+            embed.add_field(
+                name=f"{roll.total}. {name.upper()}",
+                value=effect,
+                inline=False,
+            )
+        return embed
+
+    @staticmethod
+    def get_df(spreadsheet_id: str, sheet_name: str):
+        creds = None
+        with open("credentials.json") as f:
+            creds = json.load(f)
+        gc = gspread.service_account_from_dict(creds)
+        sheet = gc.open_by_key(spreadsheet_id)
+        worksheet = sheet.worksheet(sheet_name)
+
+        data = worksheet.get_all_records()
+        return pd.DataFrame(data)
+
+    @staticmethod
+    def get_spreadsheet_id(url: str):
+        # Regular expression to match the spreadsheet ID in the URL
+        pattern = r"/spreadsheets/d/([a-zA-Z0-9-_]+)"
+        match = re.search(pattern, url)
+
+        # Check if a match was found
+        if match:
+            return match.group(1)
+        else:
+            return ""
+
+    async def fetch_and_save_character(self, context: Context, link: str) -> None:
+        """
+        Fetches the character data from the Google Sheet and saves it to the database.
 
         :param context: The hybrid command context.
-        :param question: The question that should be asked by the user.
+        :param link: The link to the character's Google Sheet.
         """
-        answers = [
-            "It is certain.",
-            "It is decidedly so.",
-            "You may rely on it.",
-            "Without a doubt.",
-            "Yes - definitely.",
-            "As I see, yes.",
-            "Most likely.",
-            "Outlook good.",
-            "Yes.",
-            "Signs point to yes.",
-            "Reply hazy, try again.",
-            "Ask again later.",
-            "Better not tell you now.",
-            "Cannot predict now.",
-            "Concentrate and ask again later.",
-            "Don't count on it.",
-            "My reply is no.",
-            "My sources say no.",
-            "Outlook not so good.",
-            "Very doubtful.",
-        ]
+        spreadsheet_id = self.get_spreadsheet_id(link)
+        attr_df = await asyncio.to_thread(self.get_df, spreadsheet_id, 'attr')
+        skills_df = await asyncio.to_thread(self.get_df, spreadsheet_id, 'skills')
+        info_df = await asyncio.to_thread(self.get_df, spreadsheet_id, 'info')
+        # attr: {attribute: {"value": value, "minmax": minmax}}
+        attr = attr_df.set_index('attribute')[['value', 'minmax']].to_dict(orient='index')
+        skills = skills_df.set_index('attribute')['value'].to_dict()
+        info = info_df.set_index('attribute')['value'].to_dict()
+
+        await self.bot.database.set_character(
+            user_id=context.author.id,
+            server_id=context.guild.id,
+            gsheet_link=link,
+            attr=attr,
+            skills=skills,
+            info=info,
+        )
         embed = discord.Embed(
-            title="**My Answer:**",
-            description=f"{random.choice(answers)}",
+            title="**Character saved**",
+            description=f"Loaded {len(attr)} attributes, {len(skills)} skills and {len(info)} other categories from the sheet.",
             color=0xBEBEFE,
         )
-        embed.set_footer(text=f"The question was: {question}")
         await context.send(embed=embed)
 
     @commands.hybrid_command(
-        name="bitcoin",
-        description="Get the current price of bitcoin.",
+        name="add",
+        description="add a gsheet data",
     )
-    async def bitcoin(self, context: Context) -> None:
+    @app_commands.describe(
+        link="Sheet link",
+    )
+    async def add(
+        self,
+        context: Context,
+        link: str,
+    ) -> None:
         """
-        Get the current price of bitcoin.
+        Loads a character from a Google Sheet and saves it.
+
+        :param context: The hybrid command context.
+        :param link: The link to the character's Google Sheet.
+        """
+        if context.guild is None:
+            embed = discord.Embed(
+                description="This command can only be used in a server.", color=0xE02B2B
+            )
+            await context.send(embed=embed)
+            return
+
+        await context.defer()
+        await self.fetch_and_save_character(context, link)
+
+    @commands.hybrid_command(
+        name="update",
+        description="update a gsheet data",
+    )
+    async def update(
+        self,
+        context: Context,
+    ) -> None:
+        """
+        Re-fetches the character from its saved Google Sheet link.
 
         :param context: The hybrid command context.
         """
-        # This will prevent your bot from stopping everything when doing a web request - see: https://discordpy.readthedocs.io/en/stable/faq.html#how-do-i-make-a-web-request
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                "https://api.coindesk.com/v1/bpi/currentprice/BTC.json"
-            ) as request:
-                if request.status == 200:
-                    data = await request.json()
-                    embed = discord.Embed(
-                        title="Bitcoin price",
-                        description=f"The current price is {data['bpi']['USD']['rate']} :dollar:",
-                        color=0xBEBEFE,
-                    )
-                else:
-                    embed = discord.Embed(
-                        title="Error!",
-                        description="There is something wrong with the API, please try again later",
-                        color=0xE02B2B,
-                    )
-                await context.send(embed=embed)
-
-    @app_commands.command(
-        name="feedback", description="Submit a feedback for the owners of the bot"
-    )
-    async def feedback(self, interaction: discord.Interaction) -> None:
-        """
-        Submit a feedback for the owners of the bot.
-
-        :param context: The hybrid command context.
-        """
-        feedback_form = FeedbackForm()
-        await interaction.response.send_modal(feedback_form)
-
-        await feedback_form.wait()
-        interaction = feedback_form.interaction
-        await interaction.response.send_message(
-            embed=discord.Embed(
-                description="Thank you for your feedback, the owners have been notified about it.",
-                color=0xBEBEFE,
+        if context.guild is None:
+            embed = discord.Embed(
+                description="This command can only be used in a server.", color=0xE02B2B
             )
-        )
+            await context.send(embed=embed)
+            return
 
-        app_owner = (await self.bot.application_info()).owner
-        await app_owner.send(
-            embed=discord.Embed(
-                title="New Feedback",
-                description=f"{interaction.user} (<@{interaction.user.id}>) has submitted a new feedback:\n```\n{feedback_form.answer}\n```",
-                color=0xBEBEFE,
+        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        if char is None or not char["gsheet_link"]:
+            embed = discord.Embed(
+                description="You don't have a character yet, use `add` with your sheet link first.",
+                color=0xE02B2B,
             )
-        )
+            await context.send(embed=embed)
+            return
+
+        await context.defer()
+        await self.fetch_and_save_character(context, char["gsheet_link"])
 
 
 async def setup(bot) -> None:

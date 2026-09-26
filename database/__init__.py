@@ -6,6 +6,8 @@ Description:
 Version: 6.5.0
 """
 
+import json
+
 import aiosqlite
 
 
@@ -94,3 +96,83 @@ class DatabaseManager:
             for row in result:
                 result_list.append(row)
             return result_list
+
+    async def set_character(
+        self,
+        user_id: int,
+        server_id: int,
+        gsheet_link: str | None = None,
+        attr: dict | None = None,
+        skills: dict | None = None,
+        info: dict | None = None,
+    ) -> None:
+        """
+        This function will create or replace the character of a user in a server.
+
+        :param user_id: The ID of the user that owns the character.
+        :param server_id: The ID of the server the character belongs to.
+        :param gsheet_link: The link to the character's Google Sheet.
+        :param attr: The attributes of the character.
+        :param skills: The skills of the character.
+        :param info: The general information of the character.
+        """
+        await self.connection.execute(
+            """INSERT INTO characters(user_id, server_id, gsheet_link, attr, skills, info) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, server_id) DO UPDATE SET
+                gsheet_link=excluded.gsheet_link, attr=excluded.attr, skills=excluded.skills, info=excluded.info""",
+            (
+                user_id,
+                server_id,
+                gsheet_link,
+                json.dumps(attr or {}),
+                json.dumps(skills or {}),
+                json.dumps(info or {}),
+            ),
+        )
+        await self.connection.commit()
+
+    async def get_character(self, user_id: int, server_id: int) -> dict | None:
+        """
+        This function will get the character of a user in a server.
+
+        :param user_id: The ID of the user that owns the character.
+        :param server_id: The ID of the server the character belongs to.
+        :return: The character as a dictionary, or None if the user has no character.
+        """
+        rows = await self.connection.execute(
+            "SELECT user_id, server_id, gsheet_link, attr, skills, info FROM characters WHERE user_id=? AND server_id=?",
+            (
+                user_id,
+                server_id,
+            ),
+        )
+        async with rows as cursor:
+            result = await cursor.fetchone()
+            if result is None:
+                return None
+            return {
+                "user_id": result[0],
+                "server_id": result[1],
+                "gsheet_link": result[2],
+                "attr": json.loads(result[3]),
+                "skills": json.loads(result[4]),
+                "info": json.loads(result[5]),
+            }
+
+    async def remove_character(self, user_id: int, server_id: int) -> bool:
+        """
+        This function will remove the character of a user in a server.
+
+        :param user_id: The ID of the user that owns the character.
+        :param server_id: The ID of the server the character belongs to.
+        :return: True if a character was removed, False otherwise.
+        """
+        rows = await self.connection.execute(
+            "DELETE FROM characters WHERE user_id=? AND server_id=?",
+            (
+                user_id,
+                server_id,
+            ),
+        )
+        await self.connection.commit()
+        return rows.rowcount > 0

@@ -64,7 +64,7 @@ It is recommended to use slash commands and therefore not use prefix commands.
 
 If you want to use prefix commands, make sure to also enable the intent below in the Discord developer portal.
 """
-# intents.message_content = True
+intents.message_content = True
 
 # Setup both of the loggers
 
@@ -139,14 +139,43 @@ class DiscordBot(commands.Bot):
         self.invite_link = os.getenv("INVITE_LINK")
 
     async def init_db(self) -> None:
-        async with aiosqlite.connect(
-            f"{os.path.realpath(os.path.dirname(__file__))}/database/database.db"
-        ) as db:
-            with open(
-                f"{os.path.realpath(os.path.dirname(__file__))}/database/schema.sql",
-                encoding = "utf-8"
-            ) as file:
+        """
+        Creates the database from schema.sql, then applies any migrations from database/migrations
+        that have not been applied yet. The applied version is stored in SQLite's user_version.
+
+        A new database is created from schema.sql, which already contains every migration,
+        so all migrations are marked as applied without running them.
+        """
+        database_dir = f"{os.path.realpath(os.path.dirname(__file__))}/database"
+        migrations_dir = f"{database_dir}/migrations"
+        migrations = sorted(
+            (int(file.split("_")[0]), file)
+            for file in os.listdir(migrations_dir)
+            if file.endswith(".sql")
+        )
+        latest_version = migrations[-1][0] if migrations else 0
+
+        async with aiosqlite.connect(f"{database_dir}/database.db") as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'"
+            ) as cursor:
+                is_new_database = (await cursor.fetchone())[0] == 0
+            async with db.execute("PRAGMA user_version") as cursor:
+                current_version = (await cursor.fetchone())[0]
+
+            with open(f"{database_dir}/schema.sql", encoding="utf-8") as file:
                 await db.executescript(file.read())
+
+            if is_new_database:
+                await db.execute(f"PRAGMA user_version = {latest_version}")
+            else:
+                for version, file_name in migrations:
+                    if version <= current_version:
+                        continue
+                    with open(f"{migrations_dir}/{file_name}", encoding="utf-8") as file:
+                        await db.executescript(file.read())
+                    await db.execute(f"PRAGMA user_version = {version}")
+                    self.logger.info(f"Applied database migration '{file_name}'")
             await db.commit()
 
     async def load_cogs(self) -> None:
