@@ -147,3 +147,93 @@ K_PANIC_EFFECT = {
 
 # Reverse lookup: panic effect name -> 1d20 roll
 K_PANIC_EFFECT_INDEX = {name: roll for roll, (name, _) in K_PANIC_EFFECT.items()}
+# Mothership 1e Wounds table: 1d10 roll (0-9) -> severity
+K_WOUND_SEVERITY = {
+    0: 'Flesh Wound',
+    1: 'Minor Injury',
+    2: 'Minor Injury',
+    3: 'Minor Injury',
+    4: 'Minor Injury',
+    5: 'Major Injury',
+    6: 'Major Injury',
+    7: 'Lethal Injury (Death Save in 1d10 rounds)',
+    8: 'Lethal Injury (Death Save in 1d10 rounds)',
+    9: 'Fatal Injury (Death Save)',
+}
+
+# Mothership 1e Wounds table, per wound type: 1d10 roll (0-9) -> effect
+K_WOUND_BLUNT_FORCE = {
+    0: 'Knocked down.',
+    1: "Winded. [-] until you catch your breath.",
+    2: 'Sprained Ankle. [-] on Speed Checks.',
+    3: 'Concussion. [-] on mental tasks.',
+    4: 'Leg or foot broken. [-] on Speed Checks.',
+    5: 'Arm or hand broken. [-] manual tasks.',
+    6: 'Snapped collarbone. [-] on Strength Checks.',
+    7: 'Back broken. [-] on all rolls.',
+    8: 'Skull fracture. [-] on all rolls.',
+    9: 'Spine or neck broken. Death Save.',
+}
+
+K_WOUND_BLEEDING = {
+    0: 'Drop held item.',
+    1: 'Lots of blood. Those Close gain 1 Stress.',
+    2: 'Blood in eyes. [-] until wiped clean.',
+    3: 'Laceration. Bleeding +1.',
+    4: 'Major cut. Bleeding +2.',
+    5: 'Fingers/toes severed. Bleeding +3.',
+    6: 'Hand/foot severed. Bleeding +4.',
+    7: 'Limb severed. Bleeding +5.',
+    8: 'Major artery cut. Bleeding +6.',
+    9: 'Throat slit or heart pierced. Death Save.',
+}
+
+K_WOUND_GUNSHOT = {
+    0: 'Grazed. Knocked down.',
+    1: 'Bleeding +1.',
+    2: 'Broken rib.',
+    3: 'Fractured extremity.',
+    4: 'Internal bleeding. Bleeding +2.',
+    5: 'Lodged bullet. Surgery required.',
+    6: 'Gunshot wound to the neck.',
+    7: 'Major blood loss. Bleeding +4.',
+    8: 'Sucking chest wound. Bleeding +5.',
+    9: 'Headshot. Death Save.',
+}
+
+K_WOUND_FIRE_EXPLOSIVES = {
+    0: 'Hair burnt. Gain 1d5 Stress.',
+    1: 'Awesome scar. +1 Minimum Stress.',
+    2: 'Singed. [-] on next action.',
+    3: 'Shrapnel/large burn.',
+    4: 'Extensive burns. -1d10 Strength.',
+    5: 'Major Burn. -2d10 Body Save.',
+    6: 'Skin grafts required. -2d10 Body Save.',
+    7: 'Limb on fire. 2d10 Damage per round.',
+    8: 'Body on fire. 3d10 Damage per round.',
+    9: 'Engulfed in fiery explosion. Death Save.',
+}
+
+K_WOUND_GORE_MASSIVE = {
+    0: 'Vomit. [-] on next action.',
+    1: 'Awesome scar. +1 Minimum Stress.',
+    2: 'Digit mangled.',
+    3: 'Eyes gouged out.',
+    4: 'Ripped off flesh. -1d10 Strength.',
+    5: 'Paralyzed waist down.',
+    6: 'Limb severed. Bleeding +5.',
+    7: 'Impaled. Bleeding +6.',
+    8: 'Guts spooled on floor. Bleeding +7.',
+    9: 'Head explodes. No Death Save. You have died.',
+}
+
+# Wound type name -> its effect table
+K_WOUNDS = {
+    'Blunt Force': K_WOUND_BLUNT_FORCE,
+    'Bleeding': K_WOUND_BLEEDING,
+    'Gunshot': K_WOUND_GUNSHOT,
+    'Fire & Explosives': K_WOUND_FIRE_EXPLOSIVES,
+    'Gore & Massive': K_WOUND_GORE_MASSIVE,
+}
+
+K_WOUND_TYPES = list(K_WOUNDS)

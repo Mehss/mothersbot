@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS `characters` (
   `attr` text NOT NULL DEFAULT '{}' CHECK (json_valid(`attr`)),
   `info` text NOT NULL DEFAULT '{}' CHECK (json_valid(`info`)),
   `skills` text NOT NULL DEFAULT '{}' CHECK (json_valid(`skills`)),
+  `conditions` text NOT NULL DEFAULT '{}' CHECK (json_valid(`conditions`)),
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`user_id`, `server_id`)
 );

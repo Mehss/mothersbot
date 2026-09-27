@@ -22,6 +22,7 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 from constants import *
+from database import Character
 
 
 class FeedbackForm(discord.ui.Modal, title="Feeedback"):
@@ -36,6 +37,43 @@ class FeedbackForm(discord.ui.Modal, title="Feeedback"):
     async def on_submit(self, interaction: discord.Interaction):
         self.interaction = interaction
         self.answer = str(self.feedback)
+        self.stop()
+
+class ConditionView(discord.ui.View):
+    def __init__(self, user_id: int, server_id: int, char_name: str, name: str, effect: str) -> None:
+        super().__init__()
+        self.user_id = user_id
+        self.server_id = server_id
+        self.char_name = char_name
+        self.name = name
+        self.effect = effect
+
+    @discord.ui.button(label="Add Condition", custom_id="cond")
+    async def condition_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Only the character's owner may add the condition to their character
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "Only the owner of this character can add this condition.", ephemeral=True
+            )
+            return
+
+        added = await interaction.client.database.add_condition(
+            self.user_id, self.server_id, self.name, self.effect
+        )
+        if not added:
+            await interaction.response.send_message(
+                "This character no longer exists.", ephemeral=True
+            )
+            return
+
+        button.disabled = True
+        button.label = "Condition added"
+        await interaction.response.edit_message(view=self)
+        embed = discord.Embed(
+            description=f"{self.char_name} gains the condition **{self.name}**.\n{self.effect}",
+            color=0xBEBEFE,
+        )
+        await interaction.followup.send(embed=embed)
         self.stop()
 
 
@@ -148,6 +186,7 @@ class General(commands.Cog, name="general"):
         attribute="The attribute to check.",
         skill="The skill to check.",
         adv="Roll with advantage [+] or disadvantage [-].",
+        mod="Add mod to your roll"
     )
     @app_commands.choices(
         attribute=[app_commands.Choice(name=a, value=a) for a in K_ATTRIBUTES],
@@ -162,6 +201,7 @@ class General(commands.Cog, name="general"):
         attribute: str,
         skill: str | None = None,
         adv: str | None = None,
+        mod: str | None= None,
     ) -> None:
         # Prefix commands and typed-over autocomplete bypass the slash options, so validate here
         if attribute not in K_ATTRIBUTES:
@@ -210,6 +250,9 @@ class General(commands.Cog, name="general"):
             elif skill in K_MASTER_SKILLS:
                 target_number += 20
 
+        roll_string='1d100-1'
+        if mod:
+            roll_string += mod
         # Advantage/disadvantage rolls twice and keeps the better/worse outcome
         rolls = [d20.roll('1d100-1') for _ in range(2 if adv else 1)]
 
@@ -226,7 +269,12 @@ class General(commands.Cog, name="general"):
         else:
             roll = max(rolls, key=outcome)
         crit = roll.total % 11 == 0
-        success = roll.total < target_number
+        # mod_roll = d20.roll('d0')
+        if mod:
+            mod_roll = d20.roll(mod)
+            success = roll.total + mod_roll.total < target_number
+        else:
+            success = roll.total < target_number
 
         result = "Success" if success else "Failure"
         if crit:
@@ -236,7 +284,9 @@ class General(commands.Cog, name="general"):
                 f"**{r.total}**" if r is roll else r.total for r in rolls
             )
         else:
-            roll_line = f"Roll: {roll.total}"
+            if mod:
+                roll_line = f"Roll: {roll.total} + {mod_roll.total}"
+            else: roll_line = f"Roll: {roll.total}"
         attribute_value = int(char['attr'][attribute]['value'])
         attribute_line = f"{attribute}: {attribute_value}"
         if has_skill:
@@ -253,11 +303,10 @@ class General(commands.Cog, name="general"):
             ),
             color=0x57F287 if success else 0xE02B2B,
         )
-        embeds = [embed]
+        await context.send(embed=embed)
         # A Critical Failure forces a Panic Check
         if crit and not success:
-            embeds.append(self.panic_embed(char))
-        await context.send(embeds=embeds)
+            await self.handle_panic(context, char)
 
     @check.autocomplete("skill")
     async def skill_autocomplete(
@@ -323,14 +372,168 @@ class General(commands.Cog, name="general"):
             await context.send(embed=embed)
             return
 
-        await context.send(embed=self.panic_embed(char))
+        await self.handle_panic(context, char)
 
-    def panic_embed(self, char: dict) -> discord.Embed:
+    @commands.hybrid_command(
+        name="conditions",
+        description="List all conditions of your character.",
+    )
+    async def conditions(self, context: Context) -> None:
         """
-        Makes a Panic Check for the character and builds the embed showing the result.
+        Lists all conditions of the character with their effects.
 
+        :param context: The hybrid command context.
+        """
+        if context.guild is None:
+            embed = discord.Embed(
+                description="This command can only be used in a server.", color=0xE02B2B
+            )
+            await context.send(embed=embed)
+            return
+        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        if char is None:
+            embed = discord.Embed(
+                description="You don't have a character yet, use `add` with your sheet link first.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+            return
+
+        embed = discord.Embed(
+            title=f"{char['info']['name']}'s conditions", color=0xBEBEFE
+        )
+        if not char['conditions']:
+            embed.description = "No conditions."
+        # Discord allows at most 25 fields per embed
+        for name, effect in list(char['conditions'].items())[:25]:
+            embed.add_field(name=name, value=effect, inline=False)
+        await context.send(embed=embed)
+
+    @commands.hybrid_command(
+        name="removecondition",
+        description="Remove a condition from your character.",
+    )
+    @app_commands.describe(
+        name="The condition to remove",
+    )
+    async def removecondition(self, context: Context, name: str) -> None:
+        """
+        Removes a condition from the character.
+
+        :param context: The hybrid command context.
+        :param name: The name of the condition to remove.
+        """
+        if context.guild is None:
+            embed = discord.Embed(
+                description="This command can only be used in a server.", color=0xE02B2B
+            )
+            await context.send(embed=embed)
+            return
+        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        if char is None:
+            embed = discord.Embed(
+                description="You don't have a character yet, use `add` with your sheet link first.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+            return
+        if name not in char['conditions']:
+            embed = discord.Embed(
+                description=f"{char['info']['name']} doesn't have the condition **{name}**.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+            return
+
+        await self.bot.database.remove_condition(context.author.id, context.guild.id, name)
+        embed = discord.Embed(
+            description=f"{char['info']['name']} is no longer affected by **{name}**.",
+            color=0x57F287,
+        )
+        await context.send(embed=embed)
+
+    @removecondition.autocomplete("name")
+    async def condition_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        # Suggest only the conditions the character currently has
+        if interaction.guild is None:
+            return []
+        char = await self.bot.database.get_character(interaction.user.id, interaction.guild.id)
+        if char is None:
+            return []
+        return [
+            app_commands.Choice(name=condition, value=condition)
+            for condition in char['conditions']
+            if current.lower() in condition.lower()
+        ][:25]
+
+    @commands.hybrid_command(
+        name="wound",
+        description="Roll on the Wounds table.",
+    )
+    @app_commands.describe(
+        wound_type="The type of wound.",
+    )
+    @app_commands.choices(
+        wound_type=[app_commands.Choice(name=t, value=t) for t in K_WOUND_TYPES],
+    )
+    async def wound(self, context: Context, wound_type: str) -> None:
+        """
+        Rolls 1d10 on the Wounds table for the given wound type and offers to add it as a condition.
+
+        :param context: The hybrid command context.
+        :param wound_type: The type of wound, one of K_WOUND_TYPES.
+        """
+        # Prefix commands bypass the slash choices, so validate here
+        if wound_type not in K_WOUNDS:
+            embed = discord.Embed(
+                description=f"Unknown wound type `{wound_type}`. Choose one of: {', '.join(K_WOUND_TYPES)}.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+            return
+        if context.guild is None:
+            embed = discord.Embed(
+                description="This command can only be used in a server.", color=0xE02B2B
+            )
+            await context.send(embed=embed)
+            return
+        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        if char is None:
+            embed = discord.Embed(
+                description="You don't have a character yet, use `add` with your sheet link first.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+            return
+
+        # The table is numbered 0-9
+        roll = d20.roll('1d10-1')
+        severity = K_WOUND_SEVERITY[roll.total]
+        effect = K_WOUNDS[wound_type][roll.total]
+        embed = discord.Embed(
+            description=(
+                f"{char['info']['name']} takes a {wound_type} wound!\n"
+                f"Roll: {roll.result}\n"
+                f"# {severity}"
+            ),
+            color=0xE02B2B,
+        )
+        embed.add_field(name=f"{roll.total}. {wound_type.upper()}", value=effect, inline=False)
+        # Name the condition after the wound's first sentence, e.g. "Gunshot: Broken rib"
+        name = f"{wound_type}: {effect.split('.')[0]}"
+        view = ConditionView(
+            int(char['user_id']), int(char['server_id']), char['info']['name'], name, effect
+        )
+        await context.send(embed=embed, view=view)
+
+    async def handle_panic(self, context: Context, char: Character) -> None:
+        """
+        Makes a Panic Check for the character and sends the result, one message per panic effect.
+
+        :param context: The hybrid command context to send the result to.
         :param char: The character, as returned by get_character.
-        :return: The embed with the check roll and any panic effects.
         """
         stress = int(char['attr']['Stress']['value'])
         check_roll, effects = self.roll_panic(stress)
@@ -339,19 +542,24 @@ class General(commands.Cog, name="general"):
             f"Roll: {check_roll.result} vs Stress {stress}\n"
         )
         if not effects:
-            return discord.Embed(
+            embed = discord.Embed(
                 description=f"{header}# Keeps it together",
                 color=0x57F287,
             )
+            await context.send(embed=embed)
+            return
 
-        embed = discord.Embed(description=f"{header}# Panic!", color=0xE02B2B)
         for roll, name, effect in effects:
+            embed = discord.Embed(description=f"{header}# Panic!", color=0xE02B2B)
             embed.add_field(
                 name=f"{roll.total}. {name.upper()}",
                 value=effect,
                 inline=False,
             )
-        return embed
+            view = ConditionView(
+                int(char['user_id']), int(char['server_id']), char['info']['name'], name, effect
+            )
+            await context.send(embed=embed, view=view)
 
     @staticmethod
     def get_df(spreadsheet_id: str, sheet_name: str):

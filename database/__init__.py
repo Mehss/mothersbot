@@ -7,8 +7,32 @@ Version: 6.5.0
 """
 
 import json
+from typing import TypedDict
 
 import aiosqlite
+
+
+# Values come straight from Google Sheets cells, so numbers may arrive as strings
+SheetValue = str | int | float | bool
+
+
+class Attribute(TypedDict):
+    value: SheetValue
+    minmax: SheetValue
+
+
+class Character(TypedDict):
+    user_id: str
+    server_id: str
+    gsheet_link: str | None
+    # attribute name -> {"value": ..., "minmax": ...}
+    attr: dict[str, Attribute]
+    # skill name -> whether the character has it ("TRUE"/"FALSE" or a bool)
+    skills: dict[str, SheetValue]
+    # info category (e.g. "name") -> value
+    info: dict[str, SheetValue]
+    # condition name -> effect
+    conditions: dict[str, str]
 
 
 class DatabaseManager:
@@ -102,9 +126,10 @@ class DatabaseManager:
         user_id: int,
         server_id: int,
         gsheet_link: str | None = None,
-        attr: dict | None = None,
-        skills: dict | None = None,
-        info: dict | None = None,
+        attr: dict[str, Attribute] | None = None,
+        skills: dict[str, SheetValue] | None = None,
+        info: dict[str, SheetValue] | None = None,
+        conditions: dict[str, str] | None = None,
     ) -> None:
         """
         This function will create or replace the character of a user in a server.
@@ -115,11 +140,14 @@ class DatabaseManager:
         :param attr: The attributes of the character.
         :param skills: The skills of the character.
         :param info: The general information of the character.
+        :param conditions: The conditions of the character, as {name: effect}.
+            If None, an existing character keeps its current conditions.
         """
         await self.connection.execute(
-            """INSERT INTO characters(user_id, server_id, gsheet_link, attr, skills, info) VALUES (?, ?, ?, ?, ?, ?)
+            """INSERT INTO characters(user_id, server_id, gsheet_link, attr, skills, info, conditions) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id, server_id) DO UPDATE SET
-                gsheet_link=excluded.gsheet_link, attr=excluded.attr, skills=excluded.skills, info=excluded.info""",
+                gsheet_link=excluded.gsheet_link, attr=excluded.attr, skills=excluded.skills, info=excluded.info,
+                conditions=CASE WHEN ? THEN excluded.conditions ELSE conditions END""",
             (
                 user_id,
                 server_id,
@@ -127,11 +155,13 @@ class DatabaseManager:
                 json.dumps(attr or {}),
                 json.dumps(skills or {}),
                 json.dumps(info or {}),
+                json.dumps(conditions or {}),
+                conditions is not None,
             ),
         )
         await self.connection.commit()
 
-    async def get_character(self, user_id: int, server_id: int) -> dict | None:
+    async def get_character(self, user_id: int, server_id: int) -> Character | None:
         """
         This function will get the character of a user in a server.
 
@@ -140,7 +170,7 @@ class DatabaseManager:
         :return: The character as a dictionary, or None if the user has no character.
         """
         rows = await self.connection.execute(
-            "SELECT user_id, server_id, gsheet_link, attr, skills, info FROM characters WHERE user_id=? AND server_id=?",
+            "SELECT user_id, server_id, gsheet_link, attr, skills, info, conditions FROM characters WHERE user_id=? AND server_id=?",
             (
                 user_id,
                 server_id,
@@ -157,7 +187,53 @@ class DatabaseManager:
                 "attr": json.loads(result[3]),
                 "skills": json.loads(result[4]),
                 "info": json.loads(result[5]),
+                "conditions": json.loads(result[6]),
             }
+
+    async def add_condition(
+        self, user_id: int, server_id: int, name: str, effect: str
+    ) -> bool:
+        """
+        This function will add a condition to the character of a user in a server,
+        replacing any existing condition with the same name.
+
+        :param user_id: The ID of the user that owns the character.
+        :param server_id: The ID of the server the character belongs to.
+        :param name: The name of the condition.
+        :param effect: The effect of the condition.
+        :return: True if the character exists and the condition was added, False otherwise.
+        """
+        rows = await self.connection.execute(
+            "UPDATE characters SET conditions=json_set(conditions, '$.' || json_quote(?), ?) WHERE user_id=? AND server_id=?",
+            (
+                name,
+                effect,
+                user_id,
+                server_id,
+            ),
+        )
+        await self.connection.commit()
+        return rows.rowcount > 0
+
+    async def remove_condition(self, user_id: int, server_id: int, name: str) -> bool:
+        """
+        This function will remove a condition from the character of a user in a server.
+
+        :param user_id: The ID of the user that owns the character.
+        :param server_id: The ID of the server the character belongs to.
+        :param name: The name of the condition.
+        :return: True if the character exists, False otherwise.
+        """
+        rows = await self.connection.execute(
+            "UPDATE characters SET conditions=json_remove(conditions, '$.' || json_quote(?)) WHERE user_id=? AND server_id=?",
+            (
+                name,
+                user_id,
+                server_id,
+            ),
+        )
+        await self.connection.commit()
+        return rows.rowcount > 0
 
     async def remove_character(self, user_id: int, server_id: int) -> bool:
         """
