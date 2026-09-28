@@ -528,6 +528,42 @@ class General(commands.Cog, name="general"):
         )
         await context.send(embed=embed, view=view)
 
+    @commands.hybrid_command(
+        name="rollchar",
+        description="Roll on the Wounds table.",
+    )
+    @app_commands.describe(
+        charname="name of your character",
+    )
+    async def rollchar(self, context: Context, charname: str) -> None:
+        """
+        roll for stats
+        """
+        # Prefix commands bypass the slash choices, so validate here
+        
+        # The table is numbered 0-9
+        embed = discord.Embed(
+            description=(
+                f"## Mothership Character Roll for {charname}\n"
+                f"# Stat\n"
+                f"{d20.roll('2d10+25').result}\n"
+                f"{d20.roll('2d10+25').result}\n"
+                f"{d20.roll('2d10+25').result}\n"
+                f"{d20.roll('2d10+25').result}\n"
+                f"*Assign these to your character Stat.*\n"
+                f"# Save\n"
+                f"{d20.roll('2d10+10').result}\n"
+                f"{d20.roll('2d10+10').result}\n"
+                f"{d20.roll('2d10+10').result}\n"
+                f"*Assign these to your character Saves.*\n"
+                f"# Max HP\n"
+                f"{d20.roll('1d10+10').result}\n\n"
+                f"__Don't forget to add your class bonus__"
+            ),
+            color=0xE02B2B,
+        )
+        await context.send(embed=embed)
+
     async def handle_panic(self, context: Context, char: Character) -> None:
         """
         Makes a Panic Check for the character and sends the result, one message per panic effect.
