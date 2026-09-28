@@ -264,7 +264,10 @@ class DiscordBot(commands.Bot):
         :param context: The context of the normal command that failed executing.
         :param error: The error that has been faced.
         """
-        if isinstance(error, commands.CommandOnCooldown):
+        if isinstance(error, commands.CommandNotFound):
+            # Ignore unknown commands (typos, other bots sharing the prefix, etc.)
+            return
+        elif isinstance(error, commands.CommandOnCooldown):
             minutes, seconds = divmod(error.retry_after, 60)
             hours, minutes = divmod(minutes, 60)
             hours = hours % 24
