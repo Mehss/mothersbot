@@ -77,6 +77,82 @@ class ConditionView(discord.ui.View):
         self.stop()
 
 
+# (label, dice, max rerolls) for each part of a /rollchar result
+K_CHAR_ROLLS = {
+    "stat": ("Stat", "2d10+25", 4),
+    "save": ("Save", "2d10+10", 3),
+    "hp": ("Max HP", "1d10+10", 1),
+}
+
+
+class MulliganForm(discord.ui.Modal, title="Mulligan"):
+    def __init__(self, view: "MulliganView") -> None:
+        super().__init__()
+        self.parent_view = view
+        self.inputs = {}
+        for key, (label, _, max_count) in K_CHAR_ROLLS.items():
+            text_input = discord.ui.TextInput(
+                label=f"{label} rerolls (0-{max_count})",
+                default="0",
+                required=False,
+                max_length=1,
+            )
+            self.inputs[key] = text_input
+            self.add_item(text_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        counts = {}
+        for key, (label, _, max_count) in K_CHAR_ROLLS.items():
+            value = str(self.inputs[key]).strip() or "0"
+            if not value.isdigit() or int(value) > max_count:
+                await interaction.response.send_message(
+                    f"{label} rerolls must be a number from 0 to {max_count}.",
+                    ephemeral=True,
+                )
+                return
+            counts[key] = int(value)
+
+        if sum(counts.values()) == 0:
+            await interaction.response.send_message(
+                "Nothing to reroll.", ephemeral=True
+            )
+            return
+
+        lines = [f"## Mulligan for {self.parent_view.charname}"]
+        for key, (label, dice, _) in K_CHAR_ROLLS.items():
+            if counts[key] == 0:
+                continue
+            lines.append(f"# {label}")
+            lines.extend(d20.roll(dice).result for _ in range(counts[key]))
+        lines.append("*Replace the same number of original rolls with these.*")
+
+        # A mulligan can only be taken once
+        self.parent_view.mulligan_button.disabled = True
+        self.parent_view.mulligan_button.label = "Mulligan used"
+        await interaction.response.edit_message(view=self.parent_view)
+        embed = discord.Embed(description="\n".join(lines), color=0xE02B2B)
+        await interaction.followup.send(embed=embed)
+        self.parent_view.stop()
+
+
+class MulliganView(discord.ui.View):
+    def __init__(self, user_id: int, charname: str) -> None:
+        super().__init__()
+        self.user_id = user_id
+        self.charname = charname
+
+    @discord.ui.button(label="Mulligan", custom_id="mulligan")
+    async def mulligan_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Only the player who rolled may take the mulligan
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "Only the player who rolled this character can mulligan.", ephemeral=True
+            )
+            return
+
+        await interaction.response.send_modal(MulliganForm(self))
+
+
 class General(commands.Cog, name="general"):
     def __init__(self, bot) -> None:
         self.bot = bot
@@ -562,7 +638,8 @@ class General(commands.Cog, name="general"):
             ),
             color=0xE02B2B,
         )
-        await context.send(embed=embed)
+        view = MulliganView(context.author.id, charname)
+        await context.send(embed=embed, view=view)
 
     async def handle_panic(self, context: Context, char: Character) -> None:
         """
