@@ -287,13 +287,17 @@ class General(commands.Cog, name="general"):
             )
             await context.send(embed=embed)
             return
-        if skill is not None and skill not in K_SKILLS:
-            embed = discord.Embed(
-                description=f"Unknown skill `{skill}`.",
-                color=0xE02B2B,
-            )
-            await context.send(embed=embed)
-            return
+        if skill is not None:
+            # Skills are matched regardless of capitalization
+            skill_names = {name.lower(): name for name in K_SKILLS}
+            if skill.strip().lower() not in skill_names:
+                embed = discord.Embed(
+                    description=f"Unknown skill `{skill}`.",
+                    color=0xE02B2B,
+                )
+                await context.send(embed=embed)
+                return
+            skill = skill_names[skill.strip().lower()]
         if adv is not None and adv not in ("adv", "dis"):
             embed = discord.Embed(
                 description=f"Unknown option `{adv}`. Use `adv` or `dis`.",
@@ -317,7 +321,8 @@ class General(commands.Cog, name="general"):
             return
         target_number = int(char['attr'][attribute]['value'])
         # The sheet marks known skills with a checkbox, which comes through as "TRUE"
-        has_skill = skill is not None and str(char['skills'].get(skill)).upper() == "TRUE"
+        sheet_skills = {str(name).lower(): value for name, value in char['skills'].items()}
+        has_skill = skill is not None and str(sheet_skills.get(skill.lower())).upper() == "TRUE"
         if has_skill:
             if skill in K_TRAINED_SKILLS:
                 target_number += 10
@@ -380,8 +385,9 @@ class General(commands.Cog, name="general"):
             color=0x57F287 if success else 0xE02B2B,
         )
         await context.send(embed=embed)
-        # A Critical Failure forces a Panic Check
+        # A Critical Failure adds 1 Stress, then forces a Panic Check
         if crit and not success:
+            await self.handle_stat_change(context, char, 'Stress', '+1')
             await self.handle_panic(context, char)
 
     @check.autocomplete("skill")
@@ -640,6 +646,102 @@ class General(commands.Cog, name="general"):
         )
         view = MulliganView(context.author.id, charname)
         await context.send(embed=embed, view=view)
+
+    @commands.hybrid_command(
+        name="stat",
+        description="Modify Stat Value",
+    )
+    @app_commands.describe(
+        stat="The stat to modify.",
+        mod="+N or -N to change the stat, or N to set it. Dice work too, e.g. -1d10.",
+    )
+    async def stat(self, context: Context, stat: str, mod: str) -> None:
+        """
+        Modify Stat Value
+
+        :param context: The hybrid command context.
+        :param stat: The name of the stat to modify.
+        :param mod: The change to apply, e.g. "+5", "-1d10" or "30".
+        """
+        if context.guild is None:
+            embed = discord.Embed(
+                description="This command can only be used in a server.", color=0xE02B2B
+            )
+            await context.send(embed=embed)
+            return
+        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        if char is None:
+            embed = discord.Embed(
+                description="You don't have a character yet, use `add` with your sheet link first.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+            return
+        # Prefix commands and typed-over autocomplete bypass the suggestions, so validate here
+        names = {name.lower(): name for name in char['attr']}
+        if stat.lower() not in names:
+            embed = discord.Embed(
+                description=f"Unknown stat `{stat}`. Choose one of: {', '.join(char['attr'])}.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+            return
+
+        await self.handle_stat_change(context, char, names[stat.lower()], mod)
+
+    @stat.autocomplete("stat")
+    async def stat_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        # Suggest only the stats the character has
+        if interaction.guild is None:
+            return []
+        char = await self.bot.database.get_character(interaction.user.id, interaction.guild.id)
+        if char is None:
+            return []
+        return [
+            app_commands.Choice(name=name, value=name)
+            for name in char['attr']
+            if current.lower() in name.lower()
+        ][:25]
+
+    async def handle_stat_change(self, context: Context, char: Character, stat: str, mod: str) -> None:
+        """
+        Applies a modifier to a stat of the character, saves it and sends the result.
+
+        :param context: The hybrid command context to send the result to.
+        :param char: The character, as returned by get_character.
+        :param stat: The name of the stat, as it appears in the character's attributes.
+        :param mod: The change to apply, e.g. "+5", "-1d10" or "30".
+        """
+        mod = mod.replace(" ", "")
+        try:
+            old_value = int(char['attr'][stat]['value'])
+            # A signed mod changes the current value, an unsigned one replaces it
+            relative = mod.startswith(("+", "-"))
+            roll = d20.roll(f"{old_value}{mod}" if relative else f"{old_value}+{mod}")
+        except (ValueError, d20.RollError):
+            embed = discord.Embed(
+                description=f"Can't apply `{mod}` to {stat}. Use something like `+5`, `-1d10` or `30`.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+            return
+
+        await self.bot.database.set_attribute(
+            int(char['user_id']), int(char['server_id']), stat, value=roll.total
+        )
+        # Keep the passed character in sync for callers that keep using it
+        char['attr'][stat]['value'] = roll.total
+        embed = discord.Embed(
+            description=(
+                f"{char['info']['name']}'s **{stat}** changes.\n"
+                f"Roll: {roll.result}\n"
+                f"# {old_value} → {roll.total}"
+            ),
+            color=0xBEBEFE,
+        )
+        await context.send(embed=embed)
 
     async def handle_panic(self, context: Context, char: Character) -> None:
         """

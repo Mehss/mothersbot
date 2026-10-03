@@ -190,6 +190,46 @@ class DatabaseManager:
                 "conditions": json.loads(result[6]),
             }
 
+    async def set_attribute(
+        self,
+        user_id: int,
+        server_id: int,
+        name: str,
+        value: SheetValue | None = None,
+        minmax: SheetValue | None = None,
+    ) -> bool:
+        """
+        This function will modify an existing attribute of the character of a user in a server.
+
+        :param user_id: The ID of the user that owns the character.
+        :param server_id: The ID of the server the character belongs to.
+        :param name: The name of the attribute.
+        :param value: The new value of the attribute. If None, the value is left unchanged.
+        :param minmax: The new min/max of the attribute. If None, the min/max is left unchanged.
+        :return: True if the character has the attribute and it was modified, False otherwise.
+        """
+        updates = {"value": value, "minmax": minmax}
+        updates = {key: new for key, new in updates.items() if new is not None}
+        if not updates:
+            return False
+
+        set_args = ", ".join(f"'$.' || json_quote(?) || '.{key}', ?" for key in updates)
+        params = []
+        for new in updates.values():
+            params.extend((name, new))
+        rows = await self.connection.execute(
+            f"""UPDATE characters SET attr=json_set(attr, {set_args})
+            WHERE user_id=? AND server_id=? AND json_type(attr, '$.' || json_quote(?)) = 'object'""",
+            (
+                *params,
+                user_id,
+                server_id,
+                name,
+            ),
+        )
+        await self.connection.commit()
+        return rows.rowcount > 0
+
     async def add_condition(
         self, user_id: int, server_id: int, name: str, effect: str
     ) -> bool:
