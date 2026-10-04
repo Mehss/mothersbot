@@ -820,6 +820,20 @@ class General(commands.Cog, name="general"):
         desc += f"HP: {attr["Health"]["value"]}/{attr['Health']['minmax']}\n"
         desc += f"Wounds: {attr["Wounds"]["value"]}/{attr['Wounds']['minmax']}\n"
         desc += f"Stress: {attr["Stress"]["value"]}/{attr['Stress']['minmax']}\n"
+        desc += "# Skills \n"
+        skills = pd.json_normalize(char["skills"]).melt()
+        skills = skills.loc[skills["value"]=="TRUE"]
+        desc += "### Trained:\n"
+        for item in skills.loc[skills["variable"].isin(K_TRAINED_SKILLS), "variable"]:
+            desc += f"- {item}\n"
+        desc += "### Expert:\n"
+        if len(skills.loc[skills["variable"].isin(K_EXPERT_SKILLS), "variable"]):
+            for item in skills.loc[skills["variable"].isin(K_EXPERT_SKILLS), "variable"]:
+                desc += f"- {item}\n"
+        if len(skills.loc[skills["variable"].isin(K_MASTER_SKILLS), "variable"]):
+            desc += "### Master:\n"
+            for item in skills.loc[skills["variable"].isin(K_MASTER_SKILLS), "variable"]:
+                desc += f"- {item}\n"
         if len(char['conditions'].items()) > 0:
             desc += "# Conditions\n"
             for key, value in list(char['conditions'].items())[:25]:
@@ -830,8 +844,10 @@ class General(commands.Cog, name="general"):
             description=desc,
             color=0xBEBEFE,
         )
-        if char["info"]["image"]:
-            embed.set_image(url=char["info"]["image"])
+        # An empty sheet cell or a non-link value would make Discord reject the whole embed
+        image = str(char["info"].get("image") or "").strip()
+        if image.startswith(("http://", "https://")):
+            embed.set_image(url=image)
         await context.send(embed=embed) 
 
     @commands.hybrid_command(
