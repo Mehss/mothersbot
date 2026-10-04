@@ -800,6 +800,47 @@ class General(commands.Cog, name="general"):
         else:
             return ""
 
+    async def embed_char(self, context:Context):
+        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        attr = pd.DataFrame.from_records(char["attr"])
+        desc = f"# {char["info"]["name"]} \n"
+        desc += f"## Trauma Response:\n"
+        desc += f"{char["info"]["trauma_response"]} \n"
+        desc += "# Stats \n"
+        desc += f"Str: {attr["Strength"]["value"]}/{attr['Strength']['minmax']}\n"
+        desc += f"Spd: {attr["Speed"]["value"]}/{attr['Speed']['minmax']}\n"
+        desc += f"Int: {attr["Intellect"]["value"]}/{attr['Intellect']['minmax']}\n"
+        desc += f"Com: {attr["Combat"]["value"]}/{attr['Combat']['minmax']}\n"
+        desc += "# Saves \n"
+        desc += f"San: {attr["Sanity"]["value"]}/{attr['Sanity']['minmax']}\n"
+        desc += f"Fear: {attr["Fear"]["value"]}/{attr['Fear']['minmax']}\n"
+        desc += f"Body: {attr["Body"]["value"]}/{attr['Body']['minmax']}\n"
+        desc += "# Survival \n"
+        desc += f"Armor: {attr["Armor"]["value"]}\n"
+        desc += f"HP: {attr["Health"]["value"]}/{attr['Health']['minmax']}\n"
+        desc += f"Wounds: {attr["Wounds"]["value"]}/{attr['Wounds']['minmax']}\n"
+        desc += f"Stress: {attr["Stress"]["value"]}/{attr['Stress']['minmax']}\n"
+        if len(char['conditions'].items()) > 0:
+            desc += "# Conditions\n"
+            for key, value in list(char['conditions'].items())[:25]:
+                desc += f"### {key}: \n" 
+                desc += f"{value} \n" 
+        embed = discord.Embed(
+            # title=f"{char["info"]["name"]}",
+            description=desc,
+            color=0xBEBEFE,
+        )
+        if char["info"]["image"]:
+            embed.set_image(url=char["info"]["image"])
+        await context.send(embed=embed) 
+
+    @commands.hybrid_command(
+            name="char",
+            description="Modify Stat Value",
+        )
+    async def char(self, context:Context):
+        await self.embed_char(context)
+
     async def fetch_and_save_character(self, context: Context, link: str) -> None:
         """
         Fetches the character data from the Google Sheet and saves it to the database.
@@ -824,12 +865,8 @@ class General(commands.Cog, name="general"):
             skills=skills,
             info=info,
         )
-        embed = discord.Embed(
-            title="**Character saved**",
-            description=f"Loaded {len(attr)} attributes, {len(skills)} skills and {len(info)} other categories from the sheet.",
-            color=0xBEBEFE,
-        )
-        await context.send(embed=embed)
+        
+        await self.embed_char(context)
 
     @commands.hybrid_command(
         name="add",
