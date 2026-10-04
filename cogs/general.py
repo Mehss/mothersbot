@@ -803,47 +803,95 @@ class General(commands.Cog, name="general"):
     async def embed_char(self, context:Context):
         char = await self.bot.database.get_character(context.author.id, context.guild.id)
         attr = pd.DataFrame.from_records(char["attr"])
+
         desc = f"# {char["info"]["name"]} \n"
         desc += f"## Trauma Response:\n"
         desc += f"{char["info"]["trauma_response"]} \n"
-        desc += "# Stats \n"
-        desc += f"Str: {attr["Strength"]["value"]}/{attr['Strength']['minmax']}\n"
-        desc += f"Spd: {attr["Speed"]["value"]}/{attr['Speed']['minmax']}\n"
-        desc += f"Int: {attr["Intellect"]["value"]}/{attr['Intellect']['minmax']}\n"
-        desc += f"Com: {attr["Combat"]["value"]}/{attr['Combat']['minmax']}\n"
-        desc += "# Saves \n"
-        desc += f"San: {attr["Sanity"]["value"]}/{attr['Sanity']['minmax']}\n"
-        desc += f"Fear: {attr["Fear"]["value"]}/{attr['Fear']['minmax']}\n"
-        desc += f"Body: {attr["Body"]["value"]}/{attr['Body']['minmax']}\n"
-        desc += "# Survival \n"
-        desc += f"Armor: {attr["Armor"]["value"]}\n"
-        desc += f"HP: {attr["Health"]["value"]}/{attr['Health']['minmax']}\n"
-        desc += f"Wounds: {attr["Wounds"]["value"]}/{attr['Wounds']['minmax']}\n"
-        desc += f"Stress: {attr["Stress"]["value"]}/{attr['Stress']['minmax']}\n"
-        desc += "# Skills \n"
-        skills = pd.json_normalize(char["skills"]).melt()
-        skills = skills.loc[skills["value"]=="TRUE"]
-        desc += "### Trained:\n"
-        for item in skills.loc[skills["variable"].isin(K_TRAINED_SKILLS), "variable"]:
-            desc += f"- {item}\n"
-        desc += "### Expert:\n"
-        if len(skills.loc[skills["variable"].isin(K_EXPERT_SKILLS), "variable"]):
-            for item in skills.loc[skills["variable"].isin(K_EXPERT_SKILLS), "variable"]:
-                desc += f"- {item}\n"
-        if len(skills.loc[skills["variable"].isin(K_MASTER_SKILLS), "variable"]):
-            desc += "### Master:\n"
-            for item in skills.loc[skills["variable"].isin(K_MASTER_SKILLS), "variable"]:
-                desc += f"- {item}\n"
-        if len(char['conditions'].items()) > 0:
-            desc += "# Conditions\n"
-            for key, value in list(char['conditions'].items())[:25]:
-                desc += f"### {key}: \n" 
-                desc += f"{value} \n" 
         embed = discord.Embed(
             # title=f"{char["info"]["name"]}",
             description=desc,
             color=0xBEBEFE,
         )
+        stat_desc = f"Str: {attr["Strength"]["value"]}/{attr['Strength']['minmax']}\n"
+        stat_desc += f"Spd: {attr["Speed"]["value"]}/{attr['Speed']['minmax']}\n"
+        stat_desc += f"Int: {attr["Intellect"]["value"]}/{attr['Intellect']['minmax']}\n"
+        stat_desc += f"Com: {attr["Combat"]["value"]}/{attr['Combat']['minmax']}\n"
+        embed.add_field(
+            name = "Stats",
+            value = stat_desc,
+            inline = True
+        )
+        # desc += "# Stats \n"
+        # desc += f"Str: {attr["Strength"]["value"]}/{attr['Strength']['minmax']}\n"
+        # desc += f"Spd: {attr["Speed"]["value"]}/{attr['Speed']['minmax']}\n"
+        # desc += f"Int: {attr["Intellect"]["value"]}/{attr['Intellect']['minmax']}\n"
+        # desc += f"Com: {attr["Combat"]["value"]}/{attr['Combat']['minmax']}\n"
+        # desc += "# Saves \n"
+        saves_desc = f"San: {attr["Sanity"]["value"]}/{attr['Sanity']['minmax']}\n"
+        saves_desc += f"Fear: {attr["Fear"]["value"]}/{attr['Fear']['minmax']}\n"
+        saves_desc += f"Body: {attr["Body"]["value"]}/{attr['Body']['minmax']}\n"
+        embed.add_field(
+            name = "Saves",
+            value = saves_desc,
+            inline = True
+        )
+        # desc += "# Survival \n"
+        surv_desc = f"Armor: {attr["Armor"]["value"]}\n"
+        surv_desc += f"HP: {attr["Health"]["value"]}/{attr['Health']['minmax']}\n"
+        surv_desc += f"Wounds: {attr["Wounds"]["value"]}/{attr['Wounds']['minmax']}\n"
+        surv_desc += f"Stress: {attr["Stress"]["value"]}/{attr['Stress']['minmax']}\n"
+        embed.add_field(
+            name = "Survival",
+            value = surv_desc,
+            inline = True
+        )
+        
+        # desc += "# Skills \n"
+        embed.add_field(
+            name="**Skills**",
+            value="",
+            inline=False
+        )
+        skills = pd.json_normalize(char["skills"]).melt()
+        skills = skills.loc[skills["value"]=="TRUE"]
+        skill_desc = ""
+        for item in skills.loc[skills["variable"].isin(K_TRAINED_SKILLS), "variable"]:
+            skill_desc += f"- {item}\n"
+        embed.add_field(
+            name="Trained",
+            value=skill_desc,
+            inline=True
+        )
+        if len(skills.loc[skills["variable"].isin(K_EXPERT_SKILLS), "variable"]):
+            skill_desc = ""
+            for item in skills.loc[skills["variable"].isin(K_EXPERT_SKILLS), "variable"]:
+                skill_desc += f"- {item}\n"
+            embed.add_field(
+                name="Expert",
+                value=skill_desc,
+                inline=True
+            )
+        if len(skills.loc[skills["variable"].isin(K_MASTER_SKILLS), "variable"]):
+            skill_desc = ""
+            for item in skills.loc[skills["variable"].isin(K_MASTER_SKILLS), "variable"]:
+                skill_desc += f"- {item}\n"
+            embed.add_field(
+                name="Master",
+                value=skill_desc,
+                inline=True
+            )
+
+        if len(char['conditions'].items()) > 0:
+            cond_desc = ""
+            for key, value in list(char['conditions'].items())[:25]:
+                cond_desc += f"**{key}:** \n" 
+                cond_desc += f"{value} \n" 
+            embed.add_field(
+                name="Conditions",
+                value=cond_desc,
+                inline=False
+            )
+        
         # An empty sheet cell or a non-link value would make Discord reject the whole embed
         image = str(char["info"].get("image") or "").strip()
         if image.startswith(("http://", "https://")):
