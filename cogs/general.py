@@ -731,16 +731,29 @@ class General(commands.Cog, name="general"):
             await context.send(embed=embed)
             return
 
+        new_value = roll.total
+        # minmax is the minimum for Stress and the maximum for everything else
+        try:
+            limit = int(char['attr'][stat]['minmax'])
+        except (TypeError, ValueError):
+            limit = None
+        if limit is not None:
+            if stat.lower() == "stress":
+                new_value = max(new_value, limit)
+            else:
+                new_value = min(new_value, limit)
+        limit_note = f" (limited to {limit})" if new_value != roll.total else ""
+
         await self.bot.database.set_attribute(
-            int(char['user_id']), int(char['server_id']), stat, value=roll.total
+            int(char['user_id']), int(char['server_id']), stat, value=new_value
         )
         # Keep the passed character in sync for callers that keep using it
-        char['attr'][stat]['value'] = roll.total
+        char['attr'][stat]['value'] = new_value
         # Going up is good and going down is bad, except for Stress and Wounds
-        improved = roll.total > old_value
+        improved = new_value > old_value
         if stat.lower() in ("stress", "wound", "wounds"):
             improved = not improved
-        if roll.total == old_value:
+        if new_value == old_value:
             color = 0x3498DB
         else:
             color = 0x57F287 if improved else 0xE02B2B
@@ -748,7 +761,7 @@ class General(commands.Cog, name="general"):
             description=(
                 f"{char['info']['name']}'s **{stat}** changes.\n"
                 f"Roll: {roll.result}\n"
-                f"# {old_value} → {roll.total}"
+                f"# {old_value} → {new_value}{limit_note}"
             ),
             color=color,
         )
