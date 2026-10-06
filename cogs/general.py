@@ -361,13 +361,15 @@ class General(commands.Cog, name="general"):
         if crit:
             result = f"Critical {result}"
         if adv:
+            print(adv)
+            print(rolls)
             roll_line = f"Rolls ({'[+]' if adv == 'adv' else '[-]'}): " + ", ".join(
-                f"**{r.total}**" if r is roll else r.total for r in rolls
+                f"**`{str(r.total)}`**" if r is roll else f"`{str(r.total)}`" for r in rolls
             )
         else:
             if mod:
-                roll_line = f"Roll: {roll.total} + {mod_roll.total}"
-            else: roll_line = f"Roll: {roll.total}"
+                roll_line = f"Roll: `{roll.total}` + `{mod_roll.total}`"
+            else: roll_line = f"Roll: `{roll.total}`"
         attribute_value = int(char['attr'][attribute]['value'])
         attribute_line = f"{attribute}: {attribute_value}"
         if has_skill:
