@@ -71,7 +71,7 @@ class ConditionView(discord.ui.View):
         await interaction.response.edit_message(view=self)
         embed = discord.Embed(
             description=f"{self.char_name} gains the condition **{self.name}**.\n{self.effect}",
-            color=0xBEBEFE,
+            color=0x3498DB,
         )
         await interaction.followup.send(embed=embed)
         self.stop()
@@ -162,7 +162,7 @@ class General(commands.Cog, name="general"):
     )
     async def help(self, context: Context) -> None:
         embed = discord.Embed(
-            title="Help", description="List of available commands:", color=0xBEBEFE
+            title="Help", description="List of available commands:", color=0x3498DB
         )
         for i in self.bot.cogs:
             if i == "owner" and not (await self.bot.is_owner(context.author)):
@@ -191,7 +191,7 @@ class General(commands.Cog, name="general"):
         """
         embed = discord.Embed(
             description="Used [Krypton's](https://krypton.ninja) template",
-            color=0xBEBEFE,
+            color=0x3498DB,
         )
         embed.set_author(name="Bot Information")
         embed.add_field(name="Owner:", value="Krypton#7331", inline=True)
@@ -224,7 +224,7 @@ class General(commands.Cog, name="general"):
         roles = ", ".join(roles)
 
         embed = discord.Embed(
-            title="**Server Name:**", description=f"{context.guild}", color=0xBEBEFE
+            title="**Server Name:**", description=f"{context.guild}", color=0x3498DB
         )
         if context.guild.icon is not None:
             embed.set_thumbnail(url=context.guild.icon.url)
@@ -250,7 +250,7 @@ class General(commands.Cog, name="general"):
         embed = discord.Embed(
             title="🏓 Pong!",
             description=f"The bot latency is {round(self.bot.latency * 1000)}ms.",
-            color=0xBEBEFE,
+            color=0x3498DB,
         )
         await context.send(embed=embed)
 
@@ -485,7 +485,7 @@ class General(commands.Cog, name="general"):
             return
 
         embed = discord.Embed(
-            title=f"{char['info']['name']}'s conditions", color=0xBEBEFE
+            title=f"{char['info']['name']}'s conditions", color=0x3498DB
         )
         if not char['conditions']:
             embed.description = "No conditions."
@@ -736,13 +736,21 @@ class General(commands.Cog, name="general"):
         )
         # Keep the passed character in sync for callers that keep using it
         char['attr'][stat]['value'] = roll.total
+        # Going up is good and going down is bad, except for Stress and Wounds
+        improved = roll.total > old_value
+        if stat.lower() in ("stress", "wound", "wounds"):
+            improved = not improved
+        if roll.total == old_value:
+            color = 0x3498DB
+        else:
+            color = 0x57F287 if improved else 0xE02B2B
         embed = discord.Embed(
             description=(
                 f"{char['info']['name']}'s **{stat}** changes.\n"
                 f"Roll: {roll.result}\n"
                 f"# {old_value} → {roll.total}"
             ),
-            color=0xBEBEFE,
+            color=color,
         )
         await context.send(embed=embed)
 
@@ -813,7 +821,7 @@ class General(commands.Cog, name="general"):
         embed = discord.Embed(
             # title=f"{char["info"]["name"]}",
             description=desc,
-            color=0xBEBEFE,
+            color=0x3498DB,
         )
         stat_desc = f"Str: {attr["Strength"]["value"]}/{attr['Strength']['minmax']}\n"
         stat_desc += f"Spd: {attr["Speed"]["value"]}/{attr['Speed']['minmax']}\n"
