@@ -340,7 +340,7 @@ class General(commands.Cog, name="general"):
         def outcome(roll: d20.RollResult) -> tuple[int, int]:
             # Rank: critical failure < failure < success < critical success,
             # ties broken towards the lower roll
-            success = roll.total < target_number
+            success = roll.total <= target_number
             crit = roll.total % 11 == 0
             rank = (2 if success else 1) + (1 if crit and success else -1 if crit else 0)
             return rank, -roll.total
