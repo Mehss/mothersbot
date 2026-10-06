@@ -386,8 +386,9 @@ class General(commands.Cog, name="general"):
         )
         await context.send(embed=embed)
         # A Critical Failure adds 1 Stress, then forces a Panic Check
-        if crit and not success:
+        if not success:
             await self.handle_stat_change(context, char, 'Stress', '+1')
+        if crit and not success:
             await self.handle_panic(context, char)
 
     @check.autocomplete("skill")
@@ -612,7 +613,7 @@ class General(commands.Cog, name="general"):
 
     @commands.hybrid_command(
         name="rollchar",
-        description="Roll on the Wounds table.",
+        description="Roll your character.",
     )
     @app_commands.describe(
         charname="name of your character",
@@ -900,7 +901,7 @@ class General(commands.Cog, name="general"):
 
     @commands.hybrid_command(
             name="char",
-            description="Modify Stat Value",
+            description="See your character",
         )
     async def char(self, context:Context):
         await self.embed_char(context)
