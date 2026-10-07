@@ -335,7 +335,11 @@ class General(commands.Cog, name="general"):
         if mod:
             roll_string += mod
         # Advantage/disadvantage rolls twice and keeps the better/worse outcome
-        rolls = [d20.roll('1d100-1') for _ in range(2 if adv else 1)]
+        if mod:
+            mod_roll = d20.roll(mod)
+            rolls = [d20.roll(f'1d100-1+{str(mod_roll.total)}') for _ in range(2 if adv else 1)]
+        else:
+            rolls = [d20.roll(f'1d100-1') for _ in range(2 if adv else 1)]
 
         def outcome(roll: d20.RollResult) -> tuple[int, int]:
             # Rank: critical failure < failure < success < critical success,
@@ -350,25 +354,28 @@ class General(commands.Cog, name="general"):
         else:
             roll = max(rolls, key=outcome)
         crit = roll.total % 11 == 0
-        # mod_roll = d20.roll('d0')
-        if mod:
-            mod_roll = d20.roll(mod)
-            success = roll.total + mod_roll.total < target_number
-        else:
-            success = roll.total < target_number
+        success = roll.total <= target_number
 
         result = "Success" if success else "Failure"
         if crit:
             result = f"Critical {result}"
         if adv:
-            print(adv)
-            print(rolls)
-            roll_line = f"Rolls ({'[+]' if adv == 'adv' else '[-]'}): " + ", ".join(
-                f"**`{str(r.total)}`**" if r is roll else f"`{str(r.total)}`" for r in rolls
-            )
+            if mod:
+                roll_line = f"Mod: {str(mod_roll.result)}\n"
+                roll_line += f"Rolls ({'[+]' if adv == 'adv' else '[-]'}): " + ", ".join(
+                    f"**`{str(r.total-mod_roll.total)}`**" if r is roll else f"`{str(r.total-mod_roll.total)}`" for r in rolls
+                )
+                roll_line += f"\nResult: `{str(roll.total)}`"
+
+            else:
+                roll_line = f"Rolls ({'[+]' if adv == 'adv' else '[-]'}): " + ", ".join(
+                    f"**`{str(r.total)}`**" if r is roll else f"`{str(r.total)}`" for r in rolls
+                )
         else:
             if mod:
-                roll_line = f"Roll: `{roll.total}` + `{mod_roll.total}`"
+                roll_line = f"Mod: {str(mod_roll.result)}\n"
+                roll_line += f"Roll: `{roll.total-mod_roll.total}` + `{mod_roll.total}`\n"
+                roll_line += f"Result: `{str(roll.total)}`"
             else: roll_line = f"Roll: `{roll.total}`"
         attribute_value = int(char['attr'][attribute]['value'])
         attribute_line = f"{attribute}: {attribute_value}"
