@@ -237,3 +237,13 @@ K_WOUNDS = {
 }
 
 K_WOUND_TYPES = list(K_WOUNDS)
+
+# Embed color for neutral messages, by the quarter of the character
+K_NEUTRAL_COLOR = 0x3498DB
+K_QUARTER_COLORS = {
+    'North': 0xC7A547,
+    'South': 0xCF5539,
+    'East': 0x45CC63,
+    'West': 0x44BBD8,
+}
+

@@ -21,6 +21,11 @@ class Attribute(TypedDict):
     minmax: SheetValue
 
 
+class InventoryItem(TypedDict):
+    qty: SheetValue
+    desc: SheetValue
+
+
 class Character(TypedDict):
     user_id: str
     server_id: str
@@ -33,6 +38,8 @@ class Character(TypedDict):
     info: dict[str, SheetValue]
     # condition name -> effect
     conditions: dict[str, str]
+    # item name -> {"qty": ..., "desc": ...}
+    inventory: dict[str, InventoryItem]
 
 
 class DatabaseManager:
@@ -130,6 +137,7 @@ class DatabaseManager:
         skills: dict[str, SheetValue] | None = None,
         info: dict[str, SheetValue] | None = None,
         conditions: dict[str, str] | None = None,
+        inventory: dict[str, InventoryItem] | None = None,
     ) -> None:
         """
         This function will create or replace the character of a user in a server.
@@ -142,12 +150,15 @@ class DatabaseManager:
         :param info: The general information of the character.
         :param conditions: The conditions of the character, as {name: effect}.
             If None, an existing character keeps its current conditions.
+        :param inventory: The inventory of the character, as {item: {"qty": ..., "desc": ...}}.
+            If None, an existing character keeps its current inventory.
         """
         await self.connection.execute(
-            """INSERT INTO characters(user_id, server_id, gsheet_link, attr, skills, info, conditions) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """INSERT INTO characters(user_id, server_id, gsheet_link, attr, skills, info, conditions, inventory) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id, server_id) DO UPDATE SET
                 gsheet_link=excluded.gsheet_link, attr=excluded.attr, skills=excluded.skills, info=excluded.info,
-                conditions=CASE WHEN ? THEN excluded.conditions ELSE conditions END""",
+                conditions=CASE WHEN ? THEN excluded.conditions ELSE conditions END,
+                inventory=CASE WHEN ? THEN excluded.inventory ELSE inventory END""",
             (
                 user_id,
                 server_id,
@@ -156,7 +167,9 @@ class DatabaseManager:
                 json.dumps(skills or {}),
                 json.dumps(info or {}),
                 json.dumps(conditions or {}),
+                json.dumps(inventory or {}),
                 conditions is not None,
+                inventory is not None,
             ),
         )
         await self.connection.commit()
@@ -170,7 +183,7 @@ class DatabaseManager:
         :return: The character as a dictionary, or None if the user has no character.
         """
         rows = await self.connection.execute(
-            "SELECT user_id, server_id, gsheet_link, attr, skills, info, conditions FROM characters WHERE user_id=? AND server_id=?",
+            "SELECT user_id, server_id, gsheet_link, attr, skills, info, conditions, inventory FROM characters WHERE user_id=? AND server_id=?",
             (
                 user_id,
                 server_id,
@@ -188,6 +201,7 @@ class DatabaseManager:
                 "skills": json.loads(result[4]),
                 "info": json.loads(result[5]),
                 "conditions": json.loads(result[6]),
+                "inventory": json.loads(result[7]),
             }
 
     async def set_attribute(

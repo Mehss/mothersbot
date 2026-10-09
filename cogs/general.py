@@ -39,12 +39,25 @@ class FeedbackForm(discord.ui.Modal, title="Feeedback"):
         self.answer = str(self.feedback)
         self.stop()
 
+def char_color(char: Character | None) -> int:
+    """
+    Gets the embed color for neutral messages about a character, based on its quarter.
+
+    :param char: The character, as returned by get_character, or None if there is none.
+    :return: The color of the character's quarter, or the default neutral color.
+    """
+    if char is None:
+        return K_NEUTRAL_COLOR
+    return K_QUARTER_COLORS.get(char['info'].get('quarter'), K_NEUTRAL_COLOR)
+
+
 class ConditionView(discord.ui.View):
-    def __init__(self, user_id: int, server_id: int, char_name: str, name: str, effect: str) -> None:
+    def __init__(self, char: Character, name: str, effect: str) -> None:
         super().__init__()
-        self.user_id = user_id
-        self.server_id = server_id
-        self.char_name = char_name
+        self.user_id = int(char['user_id'])
+        self.server_id = int(char['server_id'])
+        self.char_name = char['info']['name']
+        self.color = char_color(char)
         self.name = name
         self.effect = effect
 
@@ -71,7 +84,7 @@ class ConditionView(discord.ui.View):
         await interaction.response.edit_message(view=self)
         embed = discord.Embed(
             description=f"{self.char_name} gains the condition **{self.name}**.\n{self.effect}",
-            color=0x3498DB,
+            color=self.color,
         )
         await interaction.followup.send(embed=embed)
         self.stop()
@@ -153,16 +166,59 @@ class MulliganView(discord.ui.View):
         await interaction.response.send_modal(MulliganForm(self))
 
 
+def inventory_table(inventory: dict, limit: int) -> str:
+    """
+    Formats an inventory as a three column table (qty, name, description) in a code block.
+
+    :param inventory: The inventory, as {name: {"qty": ..., "desc": ...}}.
+    :param limit: The maximum length of the result, items that don't fit are left out.
+    :return: The table, or a placeholder text if the inventory is empty.
+    """
+    if not inventory:
+        return "No items."
+    rows = [(str(item['qty']), name, str(item['desc'])) for name, item in inventory.items()]
+    qty_width = max(len("Qty"), *(len(qty) for qty, _, _ in rows))
+    name_width = max(len("Name"), *(len(name) for _, name, _ in rows))
+    lines = [f"{'Qty':>{qty_width}}  {'Name':<{name_width}}  Description"]
+    lines += [f"{qty:>{qty_width}}  {name:<{name_width}}  {desc}".rstrip() for qty, name, desc in rows]
+
+    # Leave room for the code block and the note about left out items
+    shown = []
+    for line in lines:
+        if len("\n".join(shown + [line])) > limit - 40:
+            break
+        shown.append(line)
+    table = "```\n" + "\n".join(shown) + "\n```"
+    if len(shown) < len(lines):
+        table += f"…and {len(lines) - len(shown)} more."
+    return table
+
+
 class General(commands.Cog, name="general"):
     def __init__(self, bot) -> None:
         self.bot = bot
+
+    async def neutral_color(self, context: Context) -> int:
+        """
+        Gets the embed color for neutral messages, based on the character of the command's author.
+
+        :param context: The hybrid command context.
+        :return: The color of the character's quarter, or the default neutral color.
+        """
+        if context.guild is None:
+            return K_NEUTRAL_COLOR
+        return char_color(
+            await self.bot.database.get_character(context.author.id, context.guild.id)
+        )
 
     @commands.hybrid_command(
         name="help", description="List all commands the bot has loaded."
     )
     async def help(self, context: Context) -> None:
         embed = discord.Embed(
-            title="Help", description="List of available commands:", color=0x3498DB
+            title="Help",
+            description="List of available commands:",
+            color=await self.neutral_color(context),
         )
         for i in self.bot.cogs:
             if i == "owner" and not (await self.bot.is_owner(context.author)):
@@ -191,7 +247,7 @@ class General(commands.Cog, name="general"):
         """
         embed = discord.Embed(
             description="Used [Krypton's](https://krypton.ninja) template",
-            color=0x3498DB,
+            color=await self.neutral_color(context),
         )
         embed.set_author(name="Bot Information")
         embed.add_field(name="Owner:", value="Krypton#7331", inline=True)
@@ -224,7 +280,9 @@ class General(commands.Cog, name="general"):
         roles = ", ".join(roles)
 
         embed = discord.Embed(
-            title="**Server Name:**", description=f"{context.guild}", color=0x3498DB
+            title="**Server Name:**",
+            description=f"{context.guild}",
+            color=await self.neutral_color(context),
         )
         if context.guild.icon is not None:
             embed.set_thumbnail(url=context.guild.icon.url)
@@ -250,7 +308,7 @@ class General(commands.Cog, name="general"):
         embed = discord.Embed(
             title="🏓 Pong!",
             description=f"The bot latency is {round(self.bot.latency * 1000)}ms.",
-            color=0x3498DB,
+            color=await self.neutral_color(context),
         )
         await context.send(embed=embed)
 
@@ -492,7 +550,7 @@ class General(commands.Cog, name="general"):
             return
 
         embed = discord.Embed(
-            title=f"{char['info']['name']}'s conditions", color=0x3498DB
+            title=f"{char['info']['name']}'s conditions", color=char_color(char)
         )
         if not char['conditions']:
             embed.description = "No conditions."
@@ -615,9 +673,7 @@ class General(commands.Cog, name="general"):
         embed.add_field(name=f"{roll.total}. {wound_type.upper()}", value=effect, inline=False)
         # Name the condition after the wound's first sentence, e.g. "Gunshot: Broken rib"
         name = f"{wound_type}: {effect.split('.')[0]}"
-        view = ConditionView(
-            int(char['user_id']), int(char['server_id']), char['info']['name'], name, effect
-        )
+        view = ConditionView(char, name, effect)
         await context.send(embed=embed, view=view)
 
     @commands.hybrid_command(
@@ -761,7 +817,7 @@ class General(commands.Cog, name="general"):
         if stat.lower() in ("stress", "wound", "wounds"):
             improved = not improved
         if new_value == old_value:
-            color = 0x3498DB
+            color = char_color(char)
         else:
             color = 0x57F287 if improved else 0xE02B2B
         embed = discord.Embed(
@@ -773,6 +829,79 @@ class General(commands.Cog, name="general"):
             color=color,
         )
         await context.send(embed=embed)
+
+    @commands.hybrid_command(
+        name="inv",
+        description="Show your inventory, or one item from it.",
+    )
+    @app_commands.describe(
+        name="The item to show. Leave empty to list the whole inventory.",
+    )
+    async def inv(self, context: Context, *, name: str | None = None) -> None:
+        """
+        Shows the inventory of the character, or the quantity and description of one item.
+
+        :param context: The hybrid command context.
+        :param name: The name of the item to show. If None, the whole inventory is listed.
+        """
+        if context.guild is None:
+            embed = discord.Embed(
+                description="This command can only be used in a server.", color=0xE02B2B
+            )
+            await context.send(embed=embed)
+            return
+        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        if char is None:
+            embed = discord.Embed(
+                description="You don't have a character yet, use `add` with your sheet link first.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+            return
+
+        if name is None:
+            embed = discord.Embed(
+                title=f"{char['info']['name']}'s inventory",
+                description=inventory_table(char['inventory'], 4096),
+                color=char_color(char),
+            )
+            await context.send(embed=embed)
+            return
+
+        # Items are matched regardless of capitalization
+        item_names = {item.lower(): item for item in char['inventory']}
+        if name.strip().lower() not in item_names:
+            embed = discord.Embed(
+                description=f"{char['info']['name']} doesn't have the item **{name}**.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+            return
+        name = item_names[name.strip().lower()]
+        item = char['inventory'][name]
+        embed = discord.Embed(
+            title=name,
+            description=str(item['desc']) or "No description.",
+            color=char_color(char),
+        )
+        embed.add_field(name="Qty", value=str(item['qty']) or "-")
+        await context.send(embed=embed)
+
+    @inv.autocomplete("name")
+    async def item_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        # Suggest only the items the character has
+        if interaction.guild is None:
+            return []
+        char = await self.bot.database.get_character(interaction.user.id, interaction.guild.id)
+        if char is None:
+            return []
+        return [
+            app_commands.Choice(name=item, value=item)
+            for item in char['inventory']
+            if current.lower() in item.lower()
+        ][:25]
 
     async def handle_panic(self, context: Context, char: Character) -> None:
         """
@@ -802,9 +931,7 @@ class General(commands.Cog, name="general"):
                 value=effect,
                 inline=False,
             )
-            view = ConditionView(
-                int(char['user_id']), int(char['server_id']), char['info']['name'], name, effect
-            )
+            view = ConditionView(char, name, effect)
             await context.send(embed=embed, view=view)
 
     @staticmethod
@@ -838,16 +965,7 @@ class General(commands.Cog, name="general"):
         desc = f"# {char["info"]["name"]} \n"
         desc += f"## Trauma Response:\n"
         desc += f"{char["info"]["trauma_response"]} \n"
-        color = 0x3498DB
-        match char["info"]["quarter"]:
-            case "North":
-                color = 0xC7A547
-            case "South":
-                color = 0xCF5539
-            case "East":
-                color = 0x45CC63
-            case "West":
-                color = 0x44BBD8
+        color = char_color(char)
 
         embed = discord.Embed(
             # title=f"{char["info"]["name"]}",
@@ -962,6 +1080,14 @@ class General(commands.Cog, name="general"):
         attr = attr_df.set_index('attribute')[['value', 'minmax']].to_dict(orient='index')
         skills = skills_df.set_index('attribute')['value'].to_dict()
         info = info_df.set_index('attribute')['value'].to_dict()
+        # The inventory page is optional: without it the character keeps its current inventory
+        try:
+            inventory_df = await asyncio.to_thread(self.get_df, spreadsheet_id, 'inventory')
+        except gspread.WorksheetNotFound:
+            inventory = None
+        else:
+            # A page with no rows comes back without any columns
+            inventory = {} if inventory_df.empty else inventory_df.set_index('name')[['qty', 'desc']].to_dict(orient='index')
 
         await self.bot.database.set_character(
             user_id=context.author.id,
@@ -970,6 +1096,7 @@ class General(commands.Cog, name="general"):
             attr=attr,
             skills=skills,
             info=info,
+            inventory=inventory,
         )
         
         await self.embed_char(context)
