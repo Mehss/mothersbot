@@ -838,10 +838,21 @@ class General(commands.Cog, name="general"):
         desc = f"# {char["info"]["name"]} \n"
         desc += f"## Trauma Response:\n"
         desc += f"{char["info"]["trauma_response"]} \n"
+        color = 0x3498DB
+        match char["info"]["quarter"]:
+            case "North":
+                color = 0xC7A547
+            case "South":
+                color = 0xCF5539
+            case "East":
+                color = 0x45CC63
+            case "West":
+                color = 0x44BBD8
+
         embed = discord.Embed(
             # title=f"{char["info"]["name"]}",
             description=desc,
-            color=0x3498DB,
+            color=color,
         )
         stat_desc = f"Str: {attr["Strength"]["value"]}/{attr['Strength']['minmax']}\n"
         stat_desc += f"Spd: {attr["Speed"]["value"]}/{attr['Speed']['minmax']}\n"
