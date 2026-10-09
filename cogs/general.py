@@ -166,32 +166,24 @@ class MulliganView(discord.ui.View):
         await interaction.response.send_modal(MulliganForm(self))
 
 
-def inventory_table(inventory: dict, limit: int) -> str:
+def inventory_columns(inventory: dict) -> tuple[list[str], list[str], list[str]]:
     """
-    Formats an inventory as a three column table (qty, name, description) in a code block.
+    Splits an inventory into its three columns (qty, name, description), one line per item.
 
     :param inventory: The inventory, as {name: {"qty": ..., "desc": ...}}.
-    :param limit: The maximum length of the result, items that don't fit are left out.
-    :return: The table, or a placeholder text if the inventory is empty.
+    :return: The lines of each column. Items that don't fit in an embed field are left out.
     """
-    if not inventory:
-        return "No items."
-    rows = [(str(item['qty']), name, str(item['desc'])) for name, item in inventory.items()]
-    qty_width = max(len("Qty"), *(len(qty) for qty, _, _ in rows))
-    name_width = max(len("Name"), *(len(name) for _, name, _ in rows))
-    lines = [f"{'Qty':>{qty_width}}  {'Name':<{name_width}}  Description"]
-    lines += [f"{qty:>{qty_width}}  {name:<{name_width}}  {desc}".rstrip() for qty, name, desc in rows]
-
-    # Leave room for the code block and the note about left out items
-    shown = []
-    for line in lines:
-        if len("\n".join(shown + [line])) > limit - 40:
+    columns = ([], [], [])
+    for name, item in inventory.items():
+        # Every cell has to be exactly one non-empty line, or the columns stop lining up
+        row = [" ".join(str(cell).split()) or "-" for cell in (item['qty'], name, item['desc'])]
+        # Embed field values are limited to 1024 characters
+        if any(len("\n".join(column + [cell])) > 1024 for column, cell in zip(columns, row)):
             break
-        shown.append(line)
-    table = "```\n" + "\n".join(shown) + "\n```"
-    if len(shown) < len(lines):
-        table += f"…and {len(lines) - len(shown)} more."
-    return table
+        for column, cell in zip(columns, row):
+            column.append(cell)
+    return columns
+
 
 
 class General(commands.Cog, name="general"):
@@ -862,9 +854,17 @@ class General(commands.Cog, name="general"):
         if name is None:
             embed = discord.Embed(
                 title=f"{char['info']['name']}'s inventory",
-                description=inventory_table(char['inventory'], 4096),
                 color=char_color(char),
             )
+            if not char['inventory']:
+                embed.description = "No items."
+            else:
+                qty, names, descs = inventory_columns(char['inventory'])
+                embed.add_field(name="Qty", value="\n".join(qty), inline=True)
+                embed.add_field(name="Name", value="\n".join(names), inline=True)
+                embed.add_field(name="Description", value="\n".join(descs), inline=True)
+                if len(names) < len(char['inventory']):
+                    embed.set_footer(text=f"…and {len(char['inventory']) - len(names)} more.")
             await context.send(embed=embed)
             return
 
