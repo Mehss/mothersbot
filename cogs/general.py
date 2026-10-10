@@ -859,12 +859,21 @@ class General(commands.Cog, name="general"):
             if not char['inventory']:
                 embed.description = "No items."
             else:
-                qty, names, descs = inventory_columns(char['inventory'])
-                embed.add_field(name="Qty", value="\n".join(qty), inline=True)
-                embed.add_field(name="Name", value="\n".join(names), inline=True)
-                embed.add_field(name="Description", value="\n".join(descs), inline=True)
-                if len(names) < len(char['inventory']):
-                    embed.set_footer(text=f"…and {len(char['inventory']) - len(names)} more.")
+                desc = ""
+                # qty, names, descs = inventory_columns(char['inventory'])
+                # embed.add_field(name="Qty", value="\n".join(qty), inline=True)
+                # embed.add_field(name="Name", value="\n".join(names), inline=True)
+                # embed.add_field(name="Description", value="\n".join(descs), inline=True)
+                for item, values in (char['inventory']).items():
+                    print(values)
+                    print(item)
+                    if values.get("qty"):
+                        desc += f"{values.get('qty')}x "
+                    desc += item
+                    if values.get("desc"):
+                        desc += f": {values.get('desc')}"
+                    desc += "\n"
+                embed.description = desc
             await context.send(embed=embed)
             return
 
@@ -962,7 +971,8 @@ class General(commands.Cog, name="general"):
         char = await self.bot.database.get_character(context.author.id, context.guild.id)
         attr = pd.DataFrame.from_records(char["attr"])
 
-        desc = f"# {char["info"]["name"]} \n"
+        desc = f"# [{char["info"]["name"]}]({char["gsheet_link"]}) \n"
+        # desc += f"[Link to Dossier]({char["gsheet_link"]})\n"
         desc += f"## Trauma Response:\n"
         desc += f"{char["info"]["trauma_response"]} \n"
         color = char_color(char)
@@ -1080,6 +1090,18 @@ class General(commands.Cog, name="general"):
         attr = attr_df.set_index('attribute')[['value', 'minmax']].to_dict(orient='index')
         skills = skills_df.set_index('attribute')['value'].to_dict()
         info = info_df.set_index('attribute')['value'].to_dict()
+        print(info)
+        if info.get("trauma_response"):
+            text = str(info.get("trauma_response"))
+            if text.isupper():
+                text = text.lower()
+            info["trauma_response"] = re.sub(
+                r'(^|[.!?]\s+)(["\']?)([a-z])',
+                lambda m: m.group(1) + m.group(2) + m.group(3).upper(),
+                text,
+            )
+
+        print(info)
         # The inventory page is optional: without it the character keeps its current inventory
         try:
             inventory_df = await asyncio.to_thread(self.get_df, spreadsheet_id, 'inventory')
