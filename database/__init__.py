@@ -269,6 +269,52 @@ class DatabaseManager:
         await self.connection.commit()
         return rows.rowcount > 0
 
+    async def set_item(
+        self, user_id: int, server_id: int, name: str, qty: SheetValue, desc: SheetValue
+    ) -> bool:
+        """
+        This function will add an item to the inventory of the character of a user in a server,
+        replacing any existing item with the same name.
+
+        :param user_id: The ID of the user that owns the character.
+        :param server_id: The ID of the server the character belongs to.
+        :param name: The name of the item.
+        :param qty: The quantity of the item.
+        :param desc: The description of the item.
+        :return: True if the character exists and the item was saved, False otherwise.
+        """
+        rows = await self.connection.execute(
+            "UPDATE characters SET inventory=json_set(inventory, '$.' || json_quote(?), json(?)) WHERE user_id=? AND server_id=?",
+            (
+                name,
+                json.dumps({"qty": qty, "desc": desc}),
+                user_id,
+                server_id,
+            ),
+        )
+        await self.connection.commit()
+        return rows.rowcount > 0
+
+    async def remove_item(self, user_id: int, server_id: int, name: str) -> bool:
+        """
+        This function will remove an item from the inventory of the character of a user in a server.
+
+        :param user_id: The ID of the user that owns the character.
+        :param server_id: The ID of the server the character belongs to.
+        :param name: The name of the item.
+        :return: True if the character exists, False otherwise.
+        """
+        rows = await self.connection.execute(
+            "UPDATE characters SET inventory=json_remove(inventory, '$.' || json_quote(?)) WHERE user_id=? AND server_id=?",
+            (
+                name,
+                user_id,
+                server_id,
+            ),
+        )
+        await self.connection.commit()
+        return rows.rowcount > 0
+
     async def remove_condition(self, user_id: int, server_id: int, name: str) -> bool:
         """
         This function will remove a condition from the character of a user in a server.

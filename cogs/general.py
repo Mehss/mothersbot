@@ -203,6 +203,28 @@ class General(commands.Cog, name="general"):
             await self.bot.database.get_character(context.author.id, context.guild.id)
         )
 
+    async def get_char_or_reply(self, context: Context) -> Character | None:
+        """
+        Gets the character of the command's author, telling them why if there is none.
+
+        :param context: The hybrid command context.
+        :return: The character, or None if the command wasn't used in a server or the author has no character.
+        """
+        if context.guild is None:
+            embed = discord.Embed(
+                description="This command can only be used in a server.", color=0xE02B2B
+            )
+            await context.send(embed=embed)
+            return None
+        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        if char is None:
+            embed = discord.Embed(
+                description="You don't have a character yet, use `add` with your sheet link first.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+        return char
+
     @commands.hybrid_command(
         name="help", description="List all commands the bot has loaded."
     )
@@ -355,41 +377,36 @@ class General(commands.Cog, name="general"):
             )
             await context.send(embed=embed)
             return
-        if context.guild is None:
-            embed = discord.Embed(
-                description="This command can only be used in a server.", color=0xE02B2B
-            )
-            await context.send(embed=embed)
-            return
-        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        char = await self.get_char_or_reply(context)
         if char is None:
-            embed = discord.Embed(
-                description="You don't have a character yet, use `add` with your sheet link first.",
-                color=0xE02B2B,
-            )
-            await context.send(embed=embed)
             return
         target_number = int(char['attr'][attribute]['value'])
         # The sheet marks known skills with a checkbox, which comes through as "TRUE"
         sheet_skills = {str(name).lower(): value for name, value in char['skills'].items()}
         has_skill = skill is not None and str(sheet_skills.get(skill.lower())).upper() == "TRUE"
+        skill_bonus = 0
         if has_skill:
             if skill in K_TRAINED_SKILLS:
-                target_number += 10
+                skill_bonus += 10
             elif skill in K_EXPERT_SKILLS:
-                target_number += 15
+                skill_bonus += 15
             elif skill in K_MASTER_SKILLS:
-                target_number += 20
+                skill_bonus += 20
+            target_number += skill_bonus
 
-        roll_string='1d100-1'
-        if mod:
-            roll_string += mod
-        # Advantage/disadvantage rolls twice and keeps the better/worse outcome
-        if mod:
-            mod_roll = d20.roll(mod)
-            rolls = [d20.roll(f'1d100-1+{str(mod_roll.total)}') for _ in range(2 if adv else 1)]
-        else:
-            rolls = [d20.roll(f'1d100-1') for _ in range(2 if adv else 1)]
+        is_say = False
+        if target_number > 90: 
+            target_number = 90
+            is_say = True
+        # roll_string='1d100-1'
+        # if mod:
+        #     roll_string += mod
+        # # Advantage/disadvantage rolls twice and keeps the better/worse outcome
+        # if mod:
+        #     mod_roll = d20.roll(mod)
+        #     rolls = [d20.roll(f'1d100-1+{str(mod_roll.total)}') for _ in range(2 if adv else 1)]
+        # else:
+        rolls = [d20.roll(f'1d100-1') for _ in range(2 if adv else 1)]
 
         def outcome(roll: d20.RollResult) -> tuple[int, int]:
             # Rank: critical failure < failure < success < critical success,
@@ -410,29 +427,31 @@ class General(commands.Cog, name="general"):
         if crit:
             result = f"Critical {result}"
         if adv:
-            if mod:
-                roll_line = f"Mod: {str(mod_roll.result)}\n"
-                roll_line += f"Rolls ({'[+]' if adv == 'adv' else '[-]'}): " + ", ".join(
-                    f"**`{str(r.total-mod_roll.total)}`**" if r is roll else f"`{str(r.total-mod_roll.total)}`" for r in rolls
-                )
-                roll_line += f"\nResult: `{str(roll.total)}`"
+            # if mod:
+            #     roll_line = f"Mod: {str(mod_roll.result)}\n"
+            #     roll_line += f"Rolls ({'[+]' if adv == 'adv' else '[-]'}): " + ", ".join(
+            #         f"**`{str(r.total-mod_roll.total)}`**" if r is roll else f"`{str(r.total-mod_roll.total)}`" for r in rolls
+            #     )
+            #     roll_line += f"\nResult: `{str(roll.total)}`"
 
-            else:
-                roll_line = f"Rolls ({'[+]' if adv == 'adv' else '[-]'}): " + ", ".join(
-                    f"**`{str(r.total)}`**" if r is roll else f"`{str(r.total)}`" for r in rolls
-                )
+            # else:
+            roll_line = f"Rolls ({'[+]' if adv == 'adv' else '[-]'}): " + ", ".join(
+                f"**`{str(r.total)}`**" if r is roll else f"`{str(r.total)}`" for r in rolls
+            )
         else:
-            if mod:
-                roll_line = f"Mod: {str(mod_roll.result)}\n"
-                roll_line += f"Roll: `{roll.total-mod_roll.total}` + `{mod_roll.total}`\n"
-                roll_line += f"Result: `{str(roll.total)}`"
-            else: roll_line = f"Roll: `{roll.total}`"
+            # if mod:
+            #     roll_line = f"Mod: {str(mod_roll.result)}\n"
+            #     roll_line += f"Roll: `{roll.total-mod_roll.total}` + `{mod_roll.total}`\n"
+            #     roll_line += f"Result: `{str(roll.total)}`"
+            # else: 
+            roll_line = f"Roll: `{roll.total}`"
         attribute_value = int(char['attr'][attribute]['value'])
         attribute_line = f"{attribute}: {attribute_value}"
         if has_skill:
-            attribute_line += f" + {target_number - attribute_value} ({skill}) = {target_number}"
+            attribute_line += f" + {skill_bonus} ({skill}) = {target_number}"
         elif skill:
             attribute_line += f" (no {skill} skill)"
+        if is_say: attribute_line += "(Capped at 90)"
 
         embed = discord.Embed(
             description=(
@@ -499,19 +518,8 @@ class General(commands.Cog, name="general"):
 
         :param context: The hybrid command context.
         """
-        if context.guild is None:
-            embed = discord.Embed(
-                description="This command can only be used in a server.", color=0xE02B2B
-            )
-            await context.send(embed=embed)
-            return
-        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        char = await self.get_char_or_reply(context)
         if char is None:
-            embed = discord.Embed(
-                description="You don't have a character yet, use `add` with your sheet link first.",
-                color=0xE02B2B,
-            )
-            await context.send(embed=embed)
             return
 
         await self.handle_panic(context, char)
@@ -526,19 +534,8 @@ class General(commands.Cog, name="general"):
 
         :param context: The hybrid command context.
         """
-        if context.guild is None:
-            embed = discord.Embed(
-                description="This command can only be used in a server.", color=0xE02B2B
-            )
-            await context.send(embed=embed)
-            return
-        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        char = await self.get_char_or_reply(context)
         if char is None:
-            embed = discord.Embed(
-                description="You don't have a character yet, use `add` with your sheet link first.",
-                color=0xE02B2B,
-            )
-            await context.send(embed=embed)
             return
 
         embed = discord.Embed(
@@ -565,19 +562,8 @@ class General(commands.Cog, name="general"):
         :param context: The hybrid command context.
         :param name: The name of the condition to remove.
         """
-        if context.guild is None:
-            embed = discord.Embed(
-                description="This command can only be used in a server.", color=0xE02B2B
-            )
-            await context.send(embed=embed)
-            return
-        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        char = await self.get_char_or_reply(context)
         if char is None:
-            embed = discord.Embed(
-                description="You don't have a character yet, use `add` with your sheet link first.",
-                color=0xE02B2B,
-            )
-            await context.send(embed=embed)
             return
         if name not in char['conditions']:
             embed = discord.Embed(
@@ -635,19 +621,8 @@ class General(commands.Cog, name="general"):
             )
             await context.send(embed=embed)
             return
-        if context.guild is None:
-            embed = discord.Embed(
-                description="This command can only be used in a server.", color=0xE02B2B
-            )
-            await context.send(embed=embed)
-            return
-        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        char = await self.get_char_or_reply(context)
         if char is None:
-            embed = discord.Embed(
-                description="You don't have a character yet, use `add` with your sheet link first.",
-                color=0xE02B2B,
-            )
-            await context.send(embed=embed)
             return
 
         # The table is numbered 0-9
@@ -721,19 +696,8 @@ class General(commands.Cog, name="general"):
         :param stat: The name of the stat to modify.
         :param mod: The change to apply, e.g. "+5", "-1d10" or "30".
         """
-        if context.guild is None:
-            embed = discord.Embed(
-                description="This command can only be used in a server.", color=0xE02B2B
-            )
-            await context.send(embed=embed)
-            return
-        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        char = await self.get_char_or_reply(context)
         if char is None:
-            embed = discord.Embed(
-                description="You don't have a character yet, use `add` with your sheet link first.",
-                color=0xE02B2B,
-            )
-            await context.send(embed=embed)
             return
         # Prefix commands and typed-over autocomplete bypass the suggestions, so validate here
         names = {name.lower(): name for name in char['attr']}
@@ -823,32 +787,100 @@ class General(commands.Cog, name="general"):
         await context.send(embed=embed)
 
     @commands.hybrid_command(
-        name="inv",
-        description="Show your inventory, or one item from it.",
+        name="maxstress",
+        description="Modify your max Stress.",
     )
     @app_commands.describe(
-        name="The item to show. Leave empty to list the whole inventory.",
+        mod="The change to apply, e.g. +1, -2 or +1d5.",
     )
-    async def inv(self, context: Context, *, name: str | None = None) -> None:
+    async def maxstress(self, context: Context, mod: str) -> None:
         """
-        Shows the inventory of the character, or the quantity and description of one item.
+        Modifies the minmax of the character's Stress and saves it.
 
         :param context: The hybrid command context.
-        :param name: The name of the item to show. If None, the whole inventory is listed.
+        :param mod: The change to apply, e.g. "+1", "-2" or "+1d5".
         """
-        if context.guild is None:
-            embed = discord.Embed(
-                description="This command can only be used in a server.", color=0xE02B2B
-            )
-            await context.send(embed=embed)
-            return
-        char = await self.bot.database.get_character(context.author.id, context.guild.id)
+        char = await self.get_char_or_reply(context)
         if char is None:
+            return
+        if 'Stress' not in char['attr']:
             embed = discord.Embed(
-                description="You don't have a character yet, use `add` with your sheet link first.",
+                description=f"{char['info']['name']} has no Stress on their sheet.",
                 color=0xE02B2B,
             )
             await context.send(embed=embed)
+            return
+
+        mod = mod.replace(" ", "")
+        try:
+            old_limit = int(char['attr']['Stress']['minmax'])
+            # Like /stat, an unsigned mod is added too
+            roll = d20.roll(f"{old_limit}{mod}" if mod.startswith(("+", "-")) else f"{old_limit}+{mod}")
+            stress = int(char['attr']['Stress']['value'])
+        except (ValueError, d20.RollError):
+            embed = discord.Embed(
+                description=f"Can't apply `{mod}` to max Stress. Use something like `+1`, `-2` or `+1d5`.",
+                color=0xE02B2B,
+            )
+            await context.send(embed=embed)
+            return
+
+        new_limit = roll.total
+        # Stress can't be lower than its minmax, so raise it along with the limit
+        new_stress = max(stress, new_limit)
+        await self.bot.database.set_attribute(
+            context.author.id, context.guild.id, 'Stress', value=new_stress, minmax=new_limit
+        )
+        desc = (
+            f"{char['info']['name']}'s **max Stress** changes.\n"
+            f"Roll: {roll.result}\n"
+            f"# {old_limit} → {new_limit}"
+        )
+        if new_stress != stress:
+            desc += f"\nStress: {stress} → {new_stress}"
+        if new_limit == old_limit:
+            color = char_color(char)
+        else:
+            # A higher Stress limit is bad
+            color = 0xE02B2B if new_limit > old_limit else 0x57F287
+        embed = discord.Embed(description=desc, color=color)
+        await context.send(embed=embed)
+
+    @commands.hybrid_command(
+        name="inv",
+        description="Show your inventory or one item, or add or edit an item.",
+    )
+    @app_commands.describe(
+        name="The item to show, add or edit. Leave empty to list the whole inventory.",
+        qty="The new quantity of the item.",
+        qtymod="The change to the quantity, e.g. 2 or -1.",
+        desc="The new description of the item.",
+    )
+    async def inv(
+        self,
+        context: Context,
+        name: str | None = None,
+        qty: int | None = None,
+        qtymod: int | None = None,
+        *,
+        desc: str | None = None,
+    ) -> None:
+        """
+        Shows the inventory of the character or one of its items, or adds or edits an item.
+
+        :param context: The hybrid command context.
+        :param name: The name of the item. If None, the whole inventory is listed.
+        :param qty: The new quantity of the item.
+        :param qtymod: The change to the quantity of the item, applied after qty.
+        :param desc: The new description of the item.
+            If any of qty, qtymod or desc is given, the item is added or edited.
+        """
+        char = await self.get_char_or_reply(context)
+        if char is None:
+            return
+
+        if name is not None and (qty is not None or qtymod is not None or desc is not None):
+            await self.handle_item_change(context, char, name.strip(), qty, qtymod, desc)
             return
 
         if name is None:
@@ -894,6 +926,92 @@ class General(commands.Cog, name="general"):
             color=char_color(char),
         )
         embed.add_field(name="Qty", value=str(item['qty']) or "-")
+        await context.send(embed=embed)
+
+    async def handle_item_change(
+        self,
+        context: Context,
+        char: Character,
+        name: str,
+        qty: int | None,
+        qtymod: int | None,
+        desc: str | None,
+    ) -> None:
+        """
+        Edits an item of the character's inventory, or adds it if the character doesn't have it.
+
+        :param context: The hybrid command context to send the result to.
+        :param char: The character, as returned by get_character.
+        :param name: The name of the item.
+        :param qty: The new quantity, or None to keep the current one (1 for a new item).
+        :param qtymod: The change to the quantity, applied after qty, or None for no change.
+            A new item given only a qtymod starts from 0.
+        :param desc: The new description, or None to keep the current one (none for a new item).
+        """
+        # Items are matched regardless of capitalization
+        item_names = {item.lower(): item for item in char['inventory']}
+        existing = item_names.get(name.lower())
+        if existing is not None:
+            name = existing
+            old = char['inventory'][name]
+        else:
+            old = {"qty": 0 if qtymod is not None else 1, "desc": ""}
+        new_qty = old['qty'] if qty is None else qty
+        if qtymod is not None:
+            try:
+                # The quantity can't go below 0
+                new_qty = max(int(new_qty) + qtymod, 0)
+            except (TypeError, ValueError):
+                embed = discord.Embed(
+                    description=f"**{name}** has no number as its quantity, set one with `qty` first.",
+                    color=0xE02B2B,
+                )
+                await context.send(embed=embed)
+                return
+        item = {
+            "qty": new_qty,
+            "desc": old['desc'] if desc is None else desc,
+        }
+
+        # An item that runs out is removed from the inventory
+        if isinstance(new_qty, int) and new_qty <= 0:
+            if existing is None:
+                embed = discord.Embed(
+                    description=f"{char['info']['name']} doesn't have the item **{name}**.",
+                    color=0xE02B2B,
+                )
+                await context.send(embed=embed)
+                return
+            await self.bot.database.remove_item(
+                int(char['user_id']), int(char['server_id']), name
+            )
+            del char['inventory'][name]
+            embed = discord.Embed(
+                title=name,
+                description=f"{char['info']['name']} no longer has this item.",
+                color=char_color(char),
+            )
+            embed.add_field(name="Qty", value=f"{old['qty'] if str(old['qty']) else '-'} → 0")
+            await context.send(embed=embed)
+            return
+
+        await self.bot.database.set_item(
+            int(char['user_id']), int(char['server_id']), name, item['qty'], item['desc']
+        )
+        # Keep the passed character in sync for callers that keep using it
+        char['inventory'][name] = item
+        embed = discord.Embed(
+            title=name,
+            description=(
+                f"{char['info']['name']} {'updates' if existing is not None else 'gains'} an item.\n"
+                f"{str(item['desc']) or 'No description.'}"
+            ),
+            color=char_color(char),
+        )
+        if existing is not None and str(old['qty']) != str(item['qty']):
+            embed.add_field(name="Qty", value=f"{old['qty'] if str(old['qty']) else '-'} → {item['qty']}")
+        else:
+            embed.add_field(name="Qty", value=str(item['qty']) or "-")
         await context.send(embed=embed)
 
     @inv.autocomplete("name")
@@ -1090,7 +1208,6 @@ class General(commands.Cog, name="general"):
         attr = attr_df.set_index('attribute')[['value', 'minmax']].to_dict(orient='index')
         skills = skills_df.set_index('attribute')['value'].to_dict()
         info = info_df.set_index('attribute')['value'].to_dict()
-        print(info)
         if info.get("trauma_response"):
             text = str(info.get("trauma_response"))
             if text.isupper():
@@ -1101,7 +1218,6 @@ class General(commands.Cog, name="general"):
                 text,
             )
 
-        print(info)
         # The inventory page is optional: without it the character keeps its current inventory
         try:
             inventory_df = await asyncio.to_thread(self.get_df, spreadsheet_id, 'inventory')
